@@ -17,13 +17,23 @@ let browser = null;
 async function getBrowser() {
   if (!browser || !browser.isConnected()) {
     if (isVercel) {
-      const chromium = require('@sparticuz/chromium');
+      const chromium = require('@sparticuz/chromium-min');
       const puppeteerCore = require('puppeteer-core');
       
       browser = await puppeteerCore.launch({
-        args: chromium.args,
+        args: [
+          ...chromium.args,
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--single-process',
+          '--hide-scrollbars',
+          '--disable-web-security'
+        ],
         defaultViewport: chromium.defaultViewport,
-        executablePath: await chromium.executablePath(),
+        executablePath: await chromium.executablePath(
+          'https://github.com/Sparticuz/chromium/releases/download/v121.0.0/chromium-v121.0.0-pack.tar'
+        ),
         headless: chromium.headless,
         ignoreHTTPSErrors: true,
       });
