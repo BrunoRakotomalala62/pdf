@@ -18,7 +18,7 @@ async function scrapePDFs(searchTerm = '') {
     const $ = cheerio.load(response.data);
     const pdfs = [];
     
-    $('li.activity.modtype_resource').each((index, element) => {
+    $('li.activity.modtype_resource, li.activity.modtype_page').each((index, element) => {
       const titleElement = $(element).find('span.instancename');
       const linkElement = $(element).find('a.aalink');
       
