@@ -1,11 +1,67 @@
 const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
+const puppeteer = require('puppeteer');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 const BASE_URL = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=819';
+
+let browser = null;
+
+async function getBrowser() {
+  if (!browser) {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      executablePath: '/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-software-rasterizer'
+      ]
+    });
+  }
+  return browser;
+}
+
+async function convertPageToPdf(pageUrl) {
+  const browserInstance = await getBrowser();
+  const page = await browserInstance.newPage();
+  
+  try {
+    await page.goto(pageUrl, { 
+      waitUntil: 'networkidle2',
+      timeout: 30000
+    });
+    
+    await page.evaluate(() => {
+      const header = document.querySelector('#header, .navbar, nav');
+      const footer = document.querySelector('#footer, footer');
+      const sidebar = document.querySelector('.drawer, #nav-drawer');
+      if (header) header.style.display = 'none';
+      if (footer) footer.style.display = 'none';
+      if (sidebar) sidebar.style.display = 'none';
+    });
+    
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: {
+        top: '20mm',
+        right: '15mm',
+        bottom: '20mm',
+        left: '15mm'
+      }
+    });
+    
+    return pdfBuffer;
+  } finally {
+    await page.close();
+  }
+}
 
 async function getDirectPdfUrl(viewUrl) {
   try {
@@ -112,15 +168,21 @@ app.get('/recherche', async (req, res) => {
     const getDirectLinks = req.query.direct === 'true' || req.query.direct === '1';
     const pdfs = await scrapePDFs(searchTerm, getDirectLinks);
     
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    
     const formattedResults = pdfs.map(pdf => {
       const result = {
         titre: pdf.titre,
-        type: pdf.type === 'pdf' ? 'PDF telechargeble' : 'Page HTML',
+        type: pdf.type === 'pdf' ? 'PDF telechargeble' : 'Page HTML (convertible en PDF)',
         url_page: pdf.url_page
       };
       
       if (pdf.url_pdf) {
         result.url_pdf_direct = pdf.url_pdf;
+      }
+      
+      if (pdf.type === 'page') {
+        result.url_convertir_pdf = `${baseUrl}/convertir?url=${encodeURIComponent(pdf.url_page)}`;
       }
       
       return result;
@@ -130,7 +192,7 @@ app.get('/recherche', async (req, res) => {
       success: true,
       count: formattedResults.length,
       recherche: searchTerm || 'tous',
-      info: "Utilisez &direct=true pour obtenir les liens PDF directs (plus lent)",
+      info: "Pour les Pages HTML, utilisez url_convertir_pdf pour telecharger en PDF",
       resultats: formattedResults
     });
   } catch (error) {
@@ -142,19 +204,63 @@ app.get('/recherche', async (req, res) => {
   }
 });
 
+app.get('/convertir', async (req, res) => {
+  try {
+    const pageUrl = req.query.url;
+    
+    if (!pageUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'URL manquante',
+        usage: '/convertir?url=<url_de_la_page>'
+      });
+    }
+    
+    console.log(`Conversion en PDF: ${pageUrl}`);
+    
+    const pdfBuffer = await convertPageToPdf(pageUrl);
+    
+    const filename = pageUrl.includes('id=') 
+      ? `educmad_${pageUrl.split('id=')[1]}.pdf`
+      : 'document.pdf';
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    
+    res.send(pdfBuffer);
+    
+  } catch (error) {
+    console.error('Erreur conversion PDF:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Erreur lors de la conversion en PDF',
+      message: error.message
+    });
+  }
+});
+
 app.get('/', (req, res) => {
   res.json({
     message: 'API Scraper PDF EDUCMAD',
-    usage: '/recherche?pdf=<termes>',
-    options: {
-      'direct': 'Ajouter &direct=true pour obtenir les liens PDF directs'
+    routes: {
+      '/recherche': 'Rechercher les PDFs',
+      '/convertir': 'Convertir une page HTML en PDF'
     },
     exemples: {
       'PDF specifique': '/recherche?pdf=PC A 2020',
-      'Avec lien direct': '/recherche?pdf=PC A 2020&direct=true',
-      'Tous les PDFs': '/recherche?pdf=PC A liste'
+      'Avec lien direct': '/recherche?pdf=PC A 2023&direct=true',
+      'Tous les PDFs': '/recherche?pdf=PC A liste',
+      'Convertir page': '/convertir?url=http://mediatheque.accesmad.org/educmad/mod/page/view.php?id=26053'
     }
   });
+});
+
+process.on('SIGTERM', async () => {
+  if (browser) {
+    await browser.close();
+  }
+  process.exit(0);
 });
 
 app.listen(PORT, '0.0.0.0', () => {
