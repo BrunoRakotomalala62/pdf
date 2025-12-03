@@ -9,6 +9,7 @@ const PORT = process.env.PORT || 5000;
 const BASE_URL = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=819';
 const BASE_URL_CORRECTIONS = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=819&section=2';
 const BASE_URL_MATHS = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=1';
+const BASE_URL_MATHS_CORRECTIONS = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=2';
 
 let browser = null;
 
@@ -338,20 +339,99 @@ async function scrapeMaths(searchTerm = '', getDirectLinks = false) {
   }
 }
 
+async function scrapeMathsCorrections(searchTerm = '', getDirectLinks = false) {
+  try {
+    const response = await axios.get(BASE_URL_MATHS_CORRECTIONS, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
+    });
+    
+    const $ = cheerio.load(response.data);
+    const corrections = [];
+    
+    $('li.activity.modtype_resource, div.activity.modtype_resource').each((index, element) => {
+      const linkElement = $(element).find('a.aalink');
+      const titleElement = $(element).find('span.instancename');
+      
+      if (titleElement.length && linkElement.length) {
+        let title = titleElement.clone().children('span.accesshide').remove().end().text().trim();
+        const url = linkElement.attr('href');
+        
+        const titleLower = title.toLowerCase();
+        if (title && url && (titleLower.includes('corrig') || titleLower.includes('math'))) {
+          corrections.push({
+            titre: title,
+            url_page: url,
+            type: 'pdf',
+            url_pdf: null
+          });
+        }
+      }
+    });
+    
+    if (getDirectLinks) {
+      const pdfPromises = corrections.map(async (pdf) => {
+        const directUrl = await getDirectPdfUrl(pdf.url_page);
+        if (directUrl) {
+          pdf.url_pdf = directUrl;
+        }
+        return pdf;
+      });
+      
+      await Promise.all(pdfPromises);
+    }
+    
+    if (searchTerm) {
+      const normalizedSearch = searchTerm.toLowerCase().trim();
+      const searchWords = normalizedSearch.split(/\s+/).filter(word => word.length > 0);
+      
+      if (searchWords.includes('liste') || searchWords.includes('all') || searchWords.includes('tout') || searchWords.includes('tous')) {
+        return corrections;
+      }
+      
+      return corrections.filter(pdf => {
+        const titleLower = pdf.titre.toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        
+        return searchWords.every(word => {
+          const normalizedWord = word.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          
+          if (normalizedWord === 'a') {
+            return titleLower.includes('serie a') || titleLower.includes('série a');
+          }
+          
+          return titleLower.includes(normalizedWord);
+        });
+      });
+    }
+    
+    return corrections;
+  } catch (error) {
+    console.error('Erreur lors du scraping des corrections maths:', error.message);
+    throw error;
+  }
+}
+
 app.get('/recherche', async (req, res) => {
   try {
     const searchTerm = req.query.pdf || '';
     const getDirectLinks = req.query.direct === 'true' || req.query.direct === '1';
     
     const normalizedSearch = searchTerm.toLowerCase().trim();
-    const isCorrection = normalizedSearch.startsWith('cor ') || (normalizedSearch.startsWith('cor') && normalizedSearch.length <= 3);
-    const isMaths = normalizedSearch.startsWith('math ') || normalizedSearch.startsWith('math') && normalizedSearch.length <= 4;
+    const isMathsCorrection = normalizedSearch.startsWith('cor math ') || normalizedSearch.startsWith('cor math');
+    const isCorrection = !isMathsCorrection && (normalizedSearch.startsWith('cor ') || (normalizedSearch.startsWith('cor') && normalizedSearch.length <= 3));
+    const isMaths = normalizedSearch.startsWith('math ') || (normalizedSearch.startsWith('math') && normalizedSearch.length <= 4);
     
     let results;
     let searchTermForScraper = searchTerm;
     let searchType = 'sujets';
     
-    if (isCorrection) {
+    if (isMathsCorrection) {
+      searchTermForScraper = searchTerm.replace(/^cor\s*math\s*/i, '').trim();
+      results = await scrapeMathsCorrections(searchTermForScraper, getDirectLinks);
+      searchType = 'corrections_mathematiques';
+    } else if (isCorrection) {
       searchTermForScraper = searchTerm.replace(/^cor\s*/i, '').trim();
       results = await scrapeCorrections(searchTermForScraper, getDirectLinks);
       searchType = 'corrections';
@@ -388,6 +468,8 @@ app.get('/recherche', async (req, res) => {
       infoMessage = "Corrections du Bacc PC série A";
     } else if (searchType === 'mathematiques') {
       infoMessage = "Énoncés Bacc Mathématiques série A (1999-2022)";
+    } else if (searchType === 'corrections_mathematiques') {
+      infoMessage = "Corrections Bacc Mathématiques série A";
     }
     
     res.json({
@@ -449,7 +531,7 @@ app.get('/', (req, res) => {
   res.json({
     message: 'API Scraper PDF EDUCMAD',
     routes: {
-      '/recherche': 'Rechercher les PDFs (sujets PC, corrections PC, mathématiques)',
+      '/recherche': 'Rechercher les PDFs (sujets PC, corrections PC, mathématiques, corrections mathématiques)',
       '/convertir': 'Convertir une page HTML en PDF'
     },
     exemples: {
@@ -467,6 +549,11 @@ app.get('/', (req, res) => {
         'Math specifique': '/recherche?pdf=Math A 2000',
         'Avec lien direct': '/recherche?pdf=Math A 2022&direct=true',
         'Tous les Maths': '/recherche?pdf=Math A liste'
+      },
+      'Corrections_Mathematiques': {
+        'Correction Math specifique': '/recherche?pdf=cor Math A 2014',
+        'Avec lien direct': '/recherche?pdf=cor Math A 2023&direct=true',
+        'Toutes les corrections Math': '/recherche?pdf=cor Math A liste'
       },
       'Convertir page': '/convertir?url=http://mediatheque.accesmad.org/educmad/mod/page/view.php?id=26053'
     }

@@ -24,6 +24,7 @@ API Node.js pour scraper les liens PDF du site EDUCMAD - Sujets, Corrections du 
 - `GET /recherche?pdf=<terme>` - Recherche filtrée par terme (sujets PC)
 - `GET /recherche?pdf=cor <terme>` - Recherche des corrections PC (préfixe "cor")
 - `GET /recherche?pdf=Math <terme>` - Recherche des mathématiques (préfixe "Math")
+- `GET /recherche?pdf=cor Math <terme>` - Recherche des corrections mathématiques (préfixe "cor Math")
 - `GET /convertir?url=<url>` - Convertir une page HTML en PDF
 
 ## Exemples de recherche
@@ -42,7 +43,13 @@ API Node.js pour scraper les liens PDF du site EDUCMAD - Sujets, Corrections du 
 - `/recherche?pdf=Math A 2022&direct=true` - Avec lien direct du PDF
 - `/recherche?pdf=Math A liste` - Tous les énoncés Math (24 énoncés de 1999 à 2022 + Bacc Blanc)
 
+### Corrections Mathématiques série A
+- `/recherche?pdf=cor Math A 2014` - Correction Math spécifique
+- `/recherche?pdf=cor Math A 2023&direct=true` - Avec lien direct du PDF
+- `/recherche?pdf=cor Math A liste` - Toutes les corrections Math (48 corrections)
+
 ## Source des données
 - Sujets PC: http://mediatheque.accesmad.org/educmad/course/view.php?id=819
 - Corrections PC: http://mediatheque.accesmad.org/educmad/course/view.php?id=819&section=2
 - Mathématiques: http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=1
+- Corrections Mathématiques: http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=2
