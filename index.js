@@ -224,11 +224,13 @@ app.get('/convertir', async (req, res) => {
       ? `educmad_${pageUrl.split('id=')[1]}.pdf`
       : 'document.pdf';
     
+    const buffer = Buffer.from(pdfBuffer);
+    
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Length', pdfBuffer.length);
+    res.setHeader('Content-Length', buffer.length);
     
-    res.send(pdfBuffer);
+    res.end(buffer);
     
   } catch (error) {
     console.error('Erreur conversion PDF:', error.message);
