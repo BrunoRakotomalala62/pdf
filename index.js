@@ -1,7 +1,6 @@
 const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const puppeteer = require('puppeteer');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -11,21 +10,37 @@ const BASE_URL_CORRECTIONS = 'http://mediatheque.accesmad.org/educmad/course/vie
 const BASE_URL_MATHS = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=1';
 const BASE_URL_MATHS_CORRECTIONS = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=2';
 
+const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV !== undefined;
+
 let browser = null;
 
 async function getBrowser() {
-  if (!browser) {
-    browser = await puppeteer.launch({
-      headless: 'new',
-      executablePath: '/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-software-rasterizer'
-      ]
-    });
+  if (!browser || !browser.isConnected()) {
+    if (isVercel) {
+      const chromium = require('@sparticuz/chromium');
+      const puppeteerCore = require('puppeteer-core');
+      
+      browser = await puppeteerCore.launch({
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+        ignoreHTTPSErrors: true,
+      });
+    } else {
+      const puppeteer = require('puppeteer');
+      browser = await puppeteer.launch({
+        headless: 'new',
+        executablePath: '/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium',
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-software-rasterizer'
+        ]
+      });
+    }
   }
   return browser;
 }
