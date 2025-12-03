@@ -38,9 +38,26 @@ async function scrapePDFs(searchTerm = '') {
     
     if (searchTerm) {
       const normalizedSearch = searchTerm.toLowerCase().trim();
-      return pdfs.filter(pdf => 
-        pdf.titre.toLowerCase().includes(normalizedSearch)
-      );
+      const searchWords = normalizedSearch.split(/\s+/).filter(word => word.length > 0);
+      
+      if (searchWords.includes('liste') || searchWords.includes('all') || searchWords.includes('tout') || searchWords.includes('tous')) {
+        return pdfs;
+      }
+      
+      return pdfs.filter(pdf => {
+        const titleLower = pdf.titre.toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        
+        return searchWords.every(word => {
+          const normalizedWord = word.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          
+          if (normalizedWord === 'pc' || normalizedWord === 'spc') {
+            return titleLower.includes('physique') || titleLower.includes('pc') || titleLower.includes('spc');
+          }
+          
+          return titleLower.includes(normalizedWord);
+        });
+      });
     }
     
     return pdfs;
@@ -73,8 +90,12 @@ app.get('/recherche', async (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     message: 'API Scraper PDF EDUCMAD',
-    usage: '/recherche?pdf=PC TA',
-    exemple: '/recherche?pdf=PC A 2000'
+    usage: '/recherche?pdf=<termes>',
+    exemples: {
+      'PDF specifique': '/recherche?pdf=PC A 2020',
+      'Par annee': '/recherche?pdf=2019',
+      'Tous les PDFs': '/recherche?pdf=PC A liste'
+    }
   });
 });
 
