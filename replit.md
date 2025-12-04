@@ -6,13 +6,14 @@ API Flask pour récupérer les PDFs des sujets et corrections du Baccalauréat d
 ## Matières disponibles
 - **Mathematiques** (série A) - id: 817
 - **Physique** (série A) - id: 819
+- **Histoire-Géographie** (série A et C-D) - id: 132
 
 ## Fonctionnalités
 - Scraping automatique des titres et URLs des PDFs
 - Séparation entre sujets (énoncés) et corrections (corrigés)
 - URLs simples pour téléchargement direct: `/pdf/<id>`
 - Filtrage par matière, série, année et type
-- Conversion automatique des pages HTML en PDF (années 1999-2012)
+- Conversion automatique des pages HTML en PDF (années 1999-2011)
 - Support des PDFs directs (années 2013-2023)
 
 ## Endpoints API
@@ -22,7 +23,7 @@ Page d'accueil avec la liste des endpoints et exemples
 
 ### GET /recherche
 Recherche avec filtres:
-- `pdf` : filtre par nom/matière (mathematiques, physique)
+- `pdf` : filtre par nom/matière (mathematiques, physique, hg)
 - `serie` : filtre par série (A, C, D, L)
 - `annee` : filtre par année (1999 à 2023)
 - `type` : filtre par type (`sujet` ou `correction`)
@@ -42,26 +43,37 @@ Recherche avec filtres:
 /recherche?pdf=physique&serie=A&type=correction&annee=2019
 ```
 
+**Exemples Histoire-Géographie:**
+```
+/recherche?pdf=hg&serie=A&type=sujet
+/recherche?pdf=hg&serie=A&type=sujet&annee=2023
+/recherche?pdf=hg&serie=C&type=sujet
+/recherche?pdf=hg&serie=D&type=sujet
+/recherche?pdf=hg&serie=C&type=sujet&annee=2017
+```
+
+Note: Les séries C et D partagent le même contenu pour HG.
+
 **Réponse JSON:**
 ```json
 {
   "filtres": {
-    "pdf": "physique",
+    "pdf": "hg",
     "serie": "A",
-    "annee": "2019",
+    "annee": "2023",
     "type": "sujet"
   },
-  "total": 2,
+  "total": 1,
   "resultats": [
     {
-      "titre": "Sciences Physiques série A 1ère session 2019 - énoncé",
-      "annee": "2019",
+      "titre": "Histo Géo série A 2023 -énoncé",
+      "annee": "2023",
       "serie": "A",
-      "matiere": "Physique",
+      "matiere": "Histoire-Geo",
       "type": "sujet",
       "format": "pdf",
-      "id": "44720",
-      "url_telechargement": "https://.../pdf/44720"
+      "id": "57567",
+      "url_telechargement": "https://.../pdf/57567"
     }
   ]
 }
@@ -70,13 +82,25 @@ Recherche avec filtres:
 ### GET /pdf/<id>
 Télécharge un PDF directement via son ID de ressource Moodle.
 - Redirige automatiquement vers le fichier PDF
-- Pour les pages HTML (1999-2012): conversion automatique en PDF
-- Exemple: `/pdf/57064`
+- Pour les pages HTML (1999-2011): conversion automatique en PDF
+- Exemple: `/pdf/57567`
 
 ### GET /page/<id>
 Télécharge une page HTML convertie en PDF.
-- Utile pour les anciens sujets (1999-2012)
-- Exemple: `/page/26053`
+- Utile pour les anciens sujets (1999-2011)
+- Exemple: `/page/6191`
+
+## Années disponibles par matière
+
+### Mathématiques (série A)
+1999-2023 (toutes les années)
+
+### Physique (série A)
+1999-2023 (toutes les années)
+
+### Histoire-Géographie
+- **Série A**: 1999-2005, 2008-2011, 2013-2017, 2023
+- **Séries C-D**: 1999-2005, 2008-2011, 2013-2017, 2023
 
 ## Structure des fichiers
 ```
@@ -99,20 +123,23 @@ gunicorn --bind=0.0.0.0:5000 --reuse-port main:app
 ```
 
 ## Sources de données
-- Section 1: Énoncés/Sujets
-- Section 2: Corrigés/Corrections
+- Mathématiques/Physique: Section 1 = Sujets, Section 2 = Corrections
+- HG série A: Section 1 = Sujets et Corrections
+- HG séries C-D: Section 2 = Sujets et Corrections
 
 ## Notes techniques
 - Les URLs `/pdf/<id>` redirigent directement vers le PDF
 - Compatible téléphone: cliquez sur `url_telechargement` pour télécharger
-- Années anciennes (1999-2012): conversion HTML→PDF automatique avec wkhtmltopdf
+- Années anciennes (1999-2011): conversion HTML→PDF automatique avec wkhtmltopdf
 - Années récentes (2013-2023): téléchargement PDF direct
 
 ## Configuration des cours
 Les cours sont configurés dans `main.py` via le dictionnaire `COURSES`:
 ```python
 COURSES = {
-    'mathematiques': {'id': 817, 'name': 'Mathematiques', 'serie': 'A'},
-    'physique': {'id': 819, 'name': 'Physique', 'serie': 'A'}
+    'mathematiques': {'id': 817, 'name': 'Mathematiques', 'serie': 'A', 'sections': {'sujet': 1, 'correction': 2}},
+    'physique': {'id': 819, 'name': 'Physique', 'serie': 'A', 'sections': {'sujet': 1, 'correction': 2}},
+    'hg_a': {'id': 132, 'name': 'Histoire-Geo', 'serie': 'A', 'sections': {'sujet': 1, 'correction': 1}},
+    'hg_cd': {'id': 132, 'name': 'Histoire-Geo', 'serie': 'C-D', 'sections': {'sujet': 2, 'correction': 2}}
 }
 ```

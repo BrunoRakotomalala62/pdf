@@ -37,12 +37,26 @@ COURSES = {
     'mathematiques': {
         'id': 817,
         'name': 'Mathematiques',
-        'serie': 'A'
+        'serie': 'A',
+        'sections': {'sujet': 1, 'correction': 2}
     },
     'physique': {
         'id': 819,
         'name': 'Physique',
-        'serie': 'A'
+        'serie': 'A',
+        'sections': {'sujet': 1, 'correction': 2}
+    },
+    'hg_a': {
+        'id': 132,
+        'name': 'Histoire-Geo',
+        'serie': 'A',
+        'sections': {'sujet': 1, 'correction': 1}
+    },
+    'hg_cd': {
+        'id': 132,
+        'name': 'Histoire-Geo',
+        'serie': 'C-D',
+        'sections': {'sujet': 2, 'correction': 2}
     }
 }
 
@@ -162,7 +176,9 @@ def detect_type_from_title(text):
 
 def extract_serie(text):
     text_lower = text.lower()
-    if 'série a' in text_lower or 'serie a' in text_lower or ' a ' in text_lower:
+    if 'série c-d' in text_lower or 'serie c-d' in text_lower or 'séries c-d' in text_lower or 'series c-d' in text_lower:
+        return 'C-D'
+    elif 'série a' in text_lower or 'serie a' in text_lower or ' a ' in text_lower:
         return 'A'
     elif 'série c' in text_lower or 'serie c' in text_lower or ' c ' in text_lower:
         return 'C'
@@ -170,6 +186,8 @@ def extract_serie(text):
         return 'D'
     elif 'série l' in text_lower or 'serie l' in text_lower or ' l ' in text_lower:
         return 'L'
+    elif 'série s' in text_lower or 'serie s' in text_lower:
+        return 'S'
     return None
 
 def extract_subject(text):
@@ -178,7 +196,7 @@ def extract_subject(text):
         return 'Physique'
     elif 'math' in text_lower:
         return 'Mathematiques'
-    elif 'svt' in text_lower or 'science' in text_lower:
+    elif 'svt' in text_lower:
         return 'SVT'
     elif 'français' in text_lower or 'francais' in text_lower:
         return 'Francais'
@@ -186,7 +204,7 @@ def extract_subject(text):
         return 'Anglais'
     elif 'philo' in text_lower:
         return 'Philosophie'
-    elif 'histoire' in text_lower or 'géo' in text_lower or 'geo' in text_lower:
+    elif 'histo' in text_lower or 'géo' in text_lower or 'geo' in text_lower or 'hg' in text_lower:
         return 'Histoire-Geo'
     elif 'malagasy' in text_lower:
         return 'Malagasy'
@@ -198,7 +216,7 @@ def clean_title(text):
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
-def scrape_section(url, default_type, default_subject=None):
+def scrape_section(url, default_type, default_subject=None, default_serie=None):
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         response = requests.get(url, timeout=30, headers=headers)
@@ -219,7 +237,7 @@ def scrape_section(url, default_type, default_subject=None):
                 year_match = re.search(r'(19\d{2}|20\d{2})', clean_text)
                 year = year_match.group(1) if year_match else None
                 
-                serie = extract_serie(clean_text)
+                serie = extract_serie(clean_text) or default_serie
                 subject = extract_subject(clean_text) or default_subject
                 doc_type = detect_type_from_title(clean_text) or default_type
                 
@@ -243,40 +261,66 @@ def scrape_section(url, default_type, default_subject=None):
     except Exception as e:
         return {'error': str(e)}
 
-def scrape_course(course_id, default_subject=None):
+def scrape_course(course_id, default_subject=None, sections=None, default_serie=None):
     all_pdfs = []
     
-    sujets_url = f"{BASE_COURSE_URL}{course_id}{SECTION_SUJET}"
-    sujets = scrape_section(sujets_url, 'sujet', default_subject)
+    if sections is None:
+        sections = {'sujet': 1, 'correction': 2}
+    
+    sujet_section = sections.get('sujet', 1)
+    correction_section = sections.get('correction', 2)
+    
+    sujets_url = f"{BASE_COURSE_URL}{course_id}&section={sujet_section}"
+    sujets = scrape_section(sujets_url, 'sujet', default_subject, default_serie)
     if isinstance(sujets, list):
         all_pdfs.extend(sujets)
     
-    corrections_url = f"{BASE_COURSE_URL}{course_id}{SECTION_CORRECTION}"
-    corrections = scrape_section(corrections_url, 'correction', default_subject)
-    if isinstance(corrections, list):
-        all_pdfs.extend(corrections)
+    if correction_section != sujet_section:
+        corrections_url = f"{BASE_COURSE_URL}{course_id}&section={correction_section}"
+        corrections = scrape_section(corrections_url, 'correction', default_subject, default_serie)
+        if isinstance(corrections, list):
+            all_pdfs.extend(corrections)
     
     return all_pdfs
 
-def scrape_all_pdfs(subject_filter=None):
+def scrape_all_pdfs(subject_filter=None, serie_filter=None):
     all_pdfs = []
     
     if subject_filter:
         subject_lower = subject_filter.lower()
-        if subject_lower in COURSES:
+        
+        if subject_lower == 'hg':
+            courses_to_scrape = []
+            if serie_filter:
+                serie_upper = serie_filter.upper()
+                if serie_upper == 'A':
+                    courses_to_scrape = ['hg_a']
+                elif serie_upper in ['C', 'D', 'C-D']:
+                    courses_to_scrape = ['hg_cd']
+                else:
+                    courses_to_scrape = ['hg_a', 'hg_cd']
+            else:
+                courses_to_scrape = ['hg_a', 'hg_cd']
+            
+            for course_key in courses_to_scrape:
+                course = COURSES[course_key]
+                pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
+                if isinstance(pdfs, list):
+                    all_pdfs.extend(pdfs)
+        elif subject_lower in COURSES:
             course = COURSES[subject_lower]
-            pdfs = scrape_course(course['id'], course['name'])
+            pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
             if isinstance(pdfs, list):
                 all_pdfs.extend(pdfs)
         else:
             for course_key, course in COURSES.items():
                 if subject_lower in course['name'].lower():
-                    pdfs = scrape_course(course['id'], course['name'])
+                    pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
                     if isinstance(pdfs, list):
                         all_pdfs.extend(pdfs)
     else:
         for course_key, course in COURSES.items():
-            pdfs = scrape_course(course['id'], course['name'])
+            pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
             if isinstance(pdfs, list):
                 all_pdfs.extend(pdfs)
     
@@ -417,13 +461,13 @@ def home():
     base_url = get_api_base_url()
     return jsonify({
         'message': 'API Baccalauréat Madagascar - Téléchargement PDF',
-        'matieres_disponibles': ['mathematiques', 'physique'],
+        'matieres_disponibles': ['mathematiques', 'physique', 'hg'],
         'endpoints': {
             '/recherche': 'Recherche des sujets et corrections de bac',
             '/pdf/<id>': 'Télécharge un PDF directement (redirige vers le fichier)'
         },
         'parametres': {
-            'pdf': 'Filtre par matière (mathematiques, physique)',
+            'pdf': 'Filtre par matière (mathematiques, physique, hg)',
             'serie': 'Filtre par série (A, C, D, L)',
             'annee': 'Filtre par année (1999 à 2023)',
             'type': 'Filtre par type (sujet ou correction)'
@@ -439,9 +483,16 @@ def home():
             'Sujet physique série A 2019': f'{base_url}/recherche?pdf=physique&serie=A&type=sujet&annee=2019',
             'Correction physique série A 2019': f'{base_url}/recherche?pdf=physique&serie=A&type=correction&annee=2019'
         },
+        'exemples_hg': {
+            'Sujets HG série A': f'{base_url}/recherche?pdf=hg&serie=A&type=sujet',
+            'Sujet HG série A 2019': f'{base_url}/recherche?pdf=hg&serie=A&type=sujet&annee=2019',
+            'Sujets HG série C (ou D)': f'{base_url}/recherche?pdf=hg&serie=C&type=sujet',
+            'Sujet HG série C 2019': f'{base_url}/recherche?pdf=hg&serie=C&type=sujet&annee=2019'
+        },
         'notes': {
             'pdf_direct': 'Les années 2013-2023 sont des fichiers PDF directs',
-            'page_capture': 'Les années 1999-2012 sont des pages HTML converties en PDF automatiquement'
+            'page_capture': 'Les années 1999-2011 sont des pages HTML converties en PDF automatiquement',
+            'serie_cd': 'Pour HG, les séries C et D partagent le même contenu'
         },
         'utilisation': 'Faites une recherche, puis cliquez sur url_telechargement pour télécharger le PDF'
     })
@@ -455,7 +506,7 @@ def recherche():
     
     base_url = get_api_base_url()
     
-    pdfs = scrape_all_pdfs(pdf_filter if pdf_filter else None)
+    pdfs = scrape_all_pdfs(pdf_filter if pdf_filter else None, serie_filter if serie_filter else None)
     
     if isinstance(pdfs, dict) and 'error' in pdfs:
         return jsonify(pdfs), 500
@@ -467,11 +518,19 @@ def recherche():
         if pdf_filter:
             titre_lower = pdf['titre'].lower() if pdf['titre'] else ''
             matiere_lower = (pdf['matiere'] or '').lower()
-            if pdf_filter not in titre_lower and pdf_filter not in matiere_lower:
+            if pdf_filter == 'hg':
+                if matiere_lower != 'histoire-geo' and 'histo' not in titre_lower and 'géo' not in titre_lower and 'geo' not in titre_lower:
+                    match = False
+            elif pdf_filter not in titre_lower and pdf_filter not in matiere_lower:
                 match = False
         
-        if serie_filter and pdf['serie'] != serie_filter:
-            match = False
+        if serie_filter:
+            pdf_serie = pdf['serie'] or ''
+            if serie_filter in ['C', 'D']:
+                if pdf_serie != serie_filter and pdf_serie != 'C-D':
+                    match = False
+            elif pdf_serie != serie_filter:
+                match = False
         
         if annee_filter and pdf['annee'] != annee_filter:
             match = False
