@@ -202,6 +202,8 @@ def extract_serie(text):
     text_lower = text.lower()
     if 'série c-d' in text_lower or 'serie c-d' in text_lower or 'séries c-d' in text_lower or 'series c-d' in text_lower:
         return 'C-D'
+    elif 'série cd' in text_lower or 'serie cd' in text_lower or 'séries cd' in text_lower or 'series cd' in text_lower:
+        return 'C-D'
     elif 'série ose' in text_lower or 'serie ose' in text_lower or ' ose ' in text_lower:
         return 'OSE'
     elif 'série a' in text_lower or 'serie a' in text_lower or ' a ' in text_lower:
