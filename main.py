@@ -33,12 +33,25 @@ def clean_filename(titre):
 
 app.config['JSON_AS_ASCII'] = False
 
-BASE_URL = "http://mediatheque.accesmad.org/educmad/course/view.php?id=817"
+COURSES = {
+    'mathematiques': {
+        'id': 817,
+        'name': 'Mathematiques',
+        'serie': 'A'
+    },
+    'physique': {
+        'id': 819,
+        'name': 'Physique',
+        'serie': 'A'
+    }
+}
+
+BASE_COURSE_URL = "http://mediatheque.accesmad.org/educmad/course/view.php?id="
 SECTION_SUJET = "&section=1"
 SECTION_CORRECTION = "&section=2"
 ALLOWED_DOMAINS = ['mediatheque.accesmad.org', 'accesmad.org']
 
-PAGE_YEARS = ['2000', '2002', '2003', '2005', '2006', '2007', '2008', '2009', '2011']
+PAGE_YEARS = ['1999', '2000', '2001', '2002', '2003', '2004', '2005', '2006', '2007', '2008', '2009', '2010', '2011', '2012']
 
 def get_api_base_url():
     return request.host_url.rstrip('/')
@@ -155,14 +168,16 @@ def extract_serie(text):
         return 'C'
     elif 'série d' in text_lower or 'serie d' in text_lower or ' d ' in text_lower:
         return 'D'
+    elif 'série l' in text_lower or 'serie l' in text_lower or ' l ' in text_lower:
+        return 'L'
     return None
 
 def extract_subject(text):
     text_lower = text.lower()
-    if 'math' in text_lower:
-        return 'Mathematiques'
-    elif 'physique' in text_lower:
+    if 'physique' in text_lower or 'pc' in text_lower or 'spc' in text_lower:
         return 'Physique'
+    elif 'math' in text_lower:
+        return 'Mathematiques'
     elif 'svt' in text_lower or 'science' in text_lower:
         return 'SVT'
     elif 'français' in text_lower or 'francais' in text_lower:
@@ -183,7 +198,7 @@ def clean_title(text):
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
-def scrape_section(url, default_type):
+def scrape_section(url, default_type, default_subject=None):
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         response = requests.get(url, timeout=30, headers=headers)
@@ -205,7 +220,7 @@ def scrape_section(url, default_type):
                 year = year_match.group(1) if year_match else None
                 
                 serie = extract_serie(clean_text)
-                subject = extract_subject(clean_text)
+                subject = extract_subject(clean_text) or default_subject
                 doc_type = detect_type_from_title(clean_text) or default_type
                 
                 if clean_text and href:
@@ -228,18 +243,42 @@ def scrape_section(url, default_type):
     except Exception as e:
         return {'error': str(e)}
 
-def scrape_all_pdfs():
+def scrape_course(course_id, default_subject=None):
     all_pdfs = []
     
-    sujets_url = BASE_URL + SECTION_SUJET
-    sujets = scrape_section(sujets_url, 'sujet')
+    sujets_url = f"{BASE_COURSE_URL}{course_id}{SECTION_SUJET}"
+    sujets = scrape_section(sujets_url, 'sujet', default_subject)
     if isinstance(sujets, list):
         all_pdfs.extend(sujets)
     
-    corrections_url = BASE_URL + SECTION_CORRECTION
-    corrections = scrape_section(corrections_url, 'correction')
+    corrections_url = f"{BASE_COURSE_URL}{course_id}{SECTION_CORRECTION}"
+    corrections = scrape_section(corrections_url, 'correction', default_subject)
     if isinstance(corrections, list):
         all_pdfs.extend(corrections)
+    
+    return all_pdfs
+
+def scrape_all_pdfs(subject_filter=None):
+    all_pdfs = []
+    
+    if subject_filter:
+        subject_lower = subject_filter.lower()
+        if subject_lower in COURSES:
+            course = COURSES[subject_lower]
+            pdfs = scrape_course(course['id'], course['name'])
+            if isinstance(pdfs, list):
+                all_pdfs.extend(pdfs)
+        else:
+            for course_key, course in COURSES.items():
+                if subject_lower in course['name'].lower():
+                    pdfs = scrape_course(course['id'], course['name'])
+                    if isinstance(pdfs, list):
+                        all_pdfs.extend(pdfs)
+    else:
+        for course_key, course in COURSES.items():
+            pdfs = scrape_course(course['id'], course['name'])
+            if isinstance(pdfs, list):
+                all_pdfs.extend(pdfs)
     
     return all_pdfs
 
@@ -378,21 +417,31 @@ def home():
     base_url = get_api_base_url()
     return jsonify({
         'message': 'API Baccalauréat Madagascar - Téléchargement PDF',
+        'matieres_disponibles': ['mathematiques', 'physique'],
         'endpoints': {
             '/recherche': 'Recherche des sujets et corrections de bac',
             '/pdf/<id>': 'Télécharge un PDF directement (redirige vers le fichier)'
         },
         'parametres': {
-            'pdf': 'Filtre par matière (mathematiques, physique, svt, etc.)',
-            'serie': 'Filtre par série (A, C, D)',
-            'annee': 'Filtre par année (2005, 2009, 2022, etc.)',
+            'pdf': 'Filtre par matière (mathematiques, physique)',
+            'serie': 'Filtre par série (A, C, D, L)',
+            'annee': 'Filtre par année (1999 à 2023)',
             'type': 'Filtre par type (sujet ou correction)'
         },
-        'exemples': {
-            'Corrections maths série A': f'{base_url}/recherche?pdf=mathematiques&serie=A&type=correction',
+        'exemples_mathematiques': {
             'Sujets maths série A': f'{base_url}/recherche?pdf=mathematiques&serie=A&type=sujet',
-            'Correction maths série A 2023': f'{base_url}/recherche?pdf=mathematiques&serie=A&type=correction&annee=2023',
-            'Télécharger PDF directement': f'{base_url}/pdf/57064'
+            'Corrections maths série A': f'{base_url}/recherche?pdf=mathematiques&serie=A&type=correction',
+            'Correction maths série A 2023': f'{base_url}/recherche?pdf=mathematiques&serie=A&type=correction&annee=2023'
+        },
+        'exemples_physique': {
+            'Sujets physique série A': f'{base_url}/recherche?pdf=physique&serie=A&type=sujet',
+            'Corrections physique série A': f'{base_url}/recherche?pdf=physique&serie=A&type=correction',
+            'Sujet physique série A 2019': f'{base_url}/recherche?pdf=physique&serie=A&type=sujet&annee=2019',
+            'Correction physique série A 2019': f'{base_url}/recherche?pdf=physique&serie=A&type=correction&annee=2019'
+        },
+        'notes': {
+            'pdf_direct': 'Les années 2013-2023 sont des fichiers PDF directs',
+            'page_capture': 'Les années 1999-2012 sont des pages HTML converties en PDF automatiquement'
         },
         'utilisation': 'Faites une recherche, puis cliquez sur url_telechargement pour télécharger le PDF'
     })
@@ -406,7 +455,7 @@ def recherche():
     
     base_url = get_api_base_url()
     
-    pdfs = scrape_all_pdfs()
+    pdfs = scrape_all_pdfs(pdf_filter if pdf_filter else None)
     
     if isinstance(pdfs, dict) and 'error' in pdfs:
         return jsonify(pdfs), 500
@@ -441,10 +490,7 @@ def recherche():
             id_match = re.search(r'id=(\d+)', url_source)
             resource_id = id_match.group(1) if id_match else None
             
-            if annee in PAGE_YEARS or pdf['format'] == 'page':
-                url_telechargement = f"{base_url}/pdf/{resource_id}" if resource_id else None
-            else:
-                url_telechargement = f"{base_url}/pdf/{resource_id}" if resource_id else None
+            url_telechargement = f"{base_url}/pdf/{resource_id}" if resource_id else None
             
             resultats.append({
                 'titre': titre,
@@ -452,9 +498,12 @@ def recherche():
                 'serie': pdf['serie'],
                 'matiere': pdf['matiere'],
                 'type': pdf['type_doc'],
+                'format': pdf['format'],
                 'id': resource_id,
                 'url_telechargement': url_telechargement
             })
+    
+    resultats.sort(key=lambda x: (x['annee'] or '0000'), reverse=True)
     
     return jsonify({
         'filtres': {
@@ -472,23 +521,27 @@ def download_pdf(resource_id):
     if not resource_id or not resource_id.isdigit():
         return jsonify({'error': 'ID de ressource invalide'}), 400
     
-    source_url = f"http://mediatheque.accesmad.org/educmad/mod/resource/view.php?id={resource_id}"
+    resource_url = f"http://mediatheque.accesmad.org/educmad/mod/resource/view.php?id={resource_id}"
+    page_url = f"http://mediatheque.accesmad.org/educmad/mod/page/view.php?id={resource_id}"
     
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        response = requests.get(source_url, timeout=30, allow_redirects=True, headers=headers)
+        response = requests.get(resource_url, timeout=30, allow_redirects=True, headers=headers)
         response.encoding = 'utf-8'
         
         if 'application/pdf' in response.headers.get('Content-Type', ''):
             return redirect(response.url)
         
-        pdf_url, error = resolve_pdf_url(source_url)
+        pdf_url, error = resolve_pdf_url(resource_url)
         
         if pdf_url:
             return redirect(pdf_url)
         
         if WKHTMLTOPDF_AVAILABLE:
-            pdf_path, capture_error = capture_page_as_pdf(source_url)
+            pdf_path, capture_error = capture_page_as_pdf(resource_url)
+            
+            if not pdf_path:
+                pdf_path, capture_error = capture_page_as_pdf(page_url)
             
             if pdf_path and os.path.exists(pdf_path):
                 def generate():
@@ -508,6 +561,39 @@ def download_pdf(resource_id):
         
     except requests.exceptions.Timeout:
         return jsonify({'error': 'Timeout lors de la connexion'}), 504
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/page/<page_id>')
+def download_page_as_pdf(page_id):
+    if not page_id or not page_id.isdigit():
+        return jsonify({'error': 'ID de page invalide'}), 400
+    
+    page_url = f"http://mediatheque.accesmad.org/educmad/mod/page/view.php?id={page_id}"
+    
+    if not WKHTMLTOPDF_AVAILABLE:
+        return jsonify({'error': 'La conversion PDF n\'est pas disponible'}), 503
+    
+    try:
+        pdf_path, error = capture_page_as_pdf(page_url)
+        
+        if error:
+            return jsonify({'error': error}), 500
+        
+        if pdf_path and os.path.exists(pdf_path):
+            def generate():
+                with open(pdf_path, 'rb') as f:
+                    yield f.read()
+                os.unlink(pdf_path)
+            
+            return Response(
+                generate(),
+                mimetype='application/pdf',
+                headers={'Content-Disposition': f'attachment; filename="bac_page_{page_id}.pdf"'}
+            )
+        else:
+            return jsonify({'error': 'Impossible de capturer la page'}), 500
+            
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
