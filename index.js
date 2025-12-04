@@ -15,148 +15,163 @@ const BASE_URL_MATHS_CORRECTIONS = 'http://mediatheque.accesmad.org/educmad/cour
 
 const isReplit = process.env.REPL_ID !== undefined || process.env.REPLIT !== undefined;
 
-let cachedExecutablePath = null;
-let browserInitPromise = null;
-let browserQueue = Promise.resolve();
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 2000;
+let persistentBrowser = null;
+let browserLock = false;
+let lastBrowserActivity = Date.now();
+const BROWSER_IDLE_TIMEOUT = 5 * 60 * 1000;
 
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function initChromium() {
-  if (cachedExecutablePath) {
-    return cachedExecutablePath;
-  }
-  
-  if (browserInitPromise) {
-    return browserInitPromise;
-  }
-  
-  browserInitPromise = (async () => {
-    if (isReplit) {
-      cachedExecutablePath = '/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium';
-    } else {
-      const chromium = require('@sparticuz/chromium-min');
-      chromium.setGraphicsMode = false;
-      
-      console.log('Initialisation de Chromium...');
-      cachedExecutablePath = await chromium.executablePath(
-        'https://github.com/Sparticuz/chromium/releases/download/v123.0.1/chromium-v123.0.1-pack.tar'
-      );
-      console.log('Chromium initialisé avec succès:', cachedExecutablePath);
+async function waitForBrowserLock(maxWait = 60000) {
+  const startTime = Date.now();
+  while (browserLock) {
+    if (Date.now() - startTime > maxWait) {
+      throw new Error('Timeout en attente du navigateur');
     }
-    return cachedExecutablePath;
-  })();
-  
-  return browserInitPromise;
+    await sleep(100);
+  }
+  browserLock = true;
 }
 
-async function createBrowserWithRetry(retryCount = 0) {
+function releaseBrowserLock() {
+  browserLock = false;
+  lastBrowserActivity = Date.now();
+}
+
+async function getPersistentBrowser() {
+  if (persistentBrowser && persistentBrowser.isConnected()) {
+    return persistentBrowser;
+  }
+  
   const puppeteerCore = require('puppeteer-core');
   
-  try {
-    const executablePath = await initChromium();
+  console.log('Création du navigateur persistant...');
+  
+  if (isReplit) {
+    persistentBrowser = await puppeteerCore.launch({
+      headless: 'new',
+      executablePath: '/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-sync',
+        '--disable-translate',
+        '--no-first-run',
+        '--safebrowsing-disable-auto-update'
+      ]
+    });
+  } else {
+    const chromium = require('@sparticuz/chromium-min');
+    chromium.setGraphicsMode = false;
     
-    if (isReplit) {
-      return await puppeteerCore.launch({
-        headless: 'new',
-        executablePath,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-          '--disable-software-rasterizer'
-        ]
-      });
-    } else {
-      const chromium = require('@sparticuz/chromium-min');
-      
-      return await puppeteerCore.launch({
-        args: [
-          ...chromium.args,
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--single-process',
-          '--hide-scrollbars',
-          '--disable-web-security'
-        ],
-        defaultViewport: chromium.defaultViewport,
-        executablePath,
-        headless: chromium.headless,
-        ignoreHTTPSErrors: true,
-      });
+    const executablePath = await chromium.executablePath(
+      'https://github.com/Sparticuz/chromium/releases/download/v123.0.1/chromium-v123.0.1-pack.tar'
+    );
+    
+    persistentBrowser = await puppeteerCore.launch({
+      args: [
+        ...chromium.args,
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--single-process',
+        '--hide-scrollbars',
+        '--disable-web-security',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-sync',
+        '--disable-translate',
+        '--no-first-run'
+      ],
+      defaultViewport: chromium.defaultViewport,
+      executablePath,
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
+    });
+  }
+  
+  persistentBrowser.on('disconnected', () => {
+    console.log('Navigateur déconnecté');
+    persistentBrowser = null;
+  });
+  
+  console.log('Navigateur persistant créé avec succès');
+  return persistentBrowser;
+}
+
+async function closeBrowserIfIdle() {
+  if (persistentBrowser && !browserLock) {
+    const idleTime = Date.now() - lastBrowserActivity;
+    if (idleTime > BROWSER_IDLE_TIMEOUT) {
+      console.log('Fermeture du navigateur inactif...');
+      try {
+        await persistentBrowser.close();
+      } catch (e) { }
+      persistentBrowser = null;
     }
-  } catch (error) {
-    if (error.message && error.message.includes('ETXTBSY') && retryCount < MAX_RETRIES) {
-      console.log(`ETXTBSY erreur, tentative ${retryCount + 1}/${MAX_RETRIES}...`);
-      await sleep(RETRY_DELAY * (retryCount + 1));
-      return createBrowserWithRetry(retryCount + 1);
-    }
-    throw error;
   }
 }
 
-async function withBrowserQueue(fn) {
-  return new Promise((resolve, reject) => {
-    browserQueue = browserQueue.then(async () => {
-      try {
-        const result = await fn();
-        resolve(result);
-      } catch (error) {
-        reject(error);
-      }
-    }).catch(reject);
-  });
-}
+setInterval(closeBrowserIfIdle, 60000);
 
 async function convertPageToPdf(pageUrl) {
-  return withBrowserQueue(async () => {
-    let browser = null;
-    let page = null;
+  await waitForBrowserLock();
+  
+  let page = null;
+  
+  try {
+    const browser = await getPersistentBrowser();
+    page = await browser.newPage();
     
-    try {
-      browser = await createBrowserWithRetry();
-      page = await browser.newPage();
-      
-      await page.goto(pageUrl, { 
-        waitUntil: 'networkidle2',
-        timeout: 30000
-      });
-      
-      await page.evaluate(() => {
-        const header = document.querySelector('#header, .navbar, nav');
-        const footer = document.querySelector('#footer, footer');
-        const sidebar = document.querySelector('.drawer, #nav-drawer');
-        if (header) header.style.display = 'none';
-        if (footer) footer.style.display = 'none';
-        if (sidebar) sidebar.style.display = 'none';
-      });
-      
-      const pdfBuffer = await page.pdf({
-        format: 'A4',
-        printBackground: true,
-        margin: {
-          top: '20mm',
-          right: '15mm',
-          bottom: '20mm',
-          left: '15mm'
-        }
-      });
-      
-      return pdfBuffer;
-    } finally {
-      if (page) {
-        try { await page.close(); } catch (e) { }
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      const resourceType = req.resourceType();
+      if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+        req.abort();
+      } else {
+        req.continue();
       }
-      if (browser) {
-        try { await browser.close(); } catch (e) { }
+    });
+    
+    await page.goto(pageUrl, { 
+      waitUntil: 'domcontentloaded',
+      timeout: 20000
+    });
+    
+    await page.evaluate(() => {
+      const header = document.querySelector('#header, .navbar, nav');
+      const footer = document.querySelector('#footer, footer');
+      const sidebar = document.querySelector('.drawer, #nav-drawer');
+      if (header) header.style.display = 'none';
+      if (footer) footer.style.display = 'none';
+      if (sidebar) sidebar.style.display = 'none';
+    });
+    
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: {
+        top: '20mm',
+        right: '15mm',
+        bottom: '20mm',
+        left: '15mm'
       }
+    });
+    
+    return pdfBuffer;
+  } finally {
+    if (page) {
+      try { await page.close(); } catch (e) { }
     }
-  });
+    releaseBrowserLock();
+  }
 }
 
 async function getDirectPdfUrl(viewUrl) {
@@ -595,8 +610,12 @@ app.get('/convertir', async (req, res) => {
     }
     
     console.log(`Conversion en PDF: ${pageUrl}`);
+    const startTime = Date.now();
     
     const pdfBuffer = await convertPageToPdf(pageUrl);
+    
+    const duration = Date.now() - startTime;
+    console.log(`PDF généré en ${duration}ms`);
     
     const filename = pageUrl.includes('id=') 
       ? `educmad_${pageUrl.split('id=')[1]}.pdf`
@@ -620,12 +639,30 @@ app.get('/convertir', async (req, res) => {
   }
 });
 
+app.get('/warmup', async (req, res) => {
+  try {
+    console.log('Warmup: initialisation du navigateur...');
+    await getPersistentBrowser();
+    res.json({ 
+      success: true, 
+      message: 'Navigateur prêt',
+      browserReady: persistentBrowser !== null && persistentBrowser.isConnected()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 app.get('/', (req, res) => {
   res.json({
     message: 'API Scraper PDF EDUCMAD',
     routes: {
       '/recherche': 'Rechercher les PDFs (sujets PC, corrections PC, mathématiques, corrections mathématiques)',
-      '/convertir': 'Convertir une page HTML en PDF'
+      '/convertir': 'Convertir une page HTML en PDF',
+      '/warmup': 'Pré-charger le navigateur pour des conversions plus rapides'
     },
     exemples: {
       'Sujets_PC': {
@@ -649,7 +686,8 @@ app.get('/', (req, res) => {
         'Toutes les corrections Math': '/recherche?pdf=cor Math A liste'
       },
       'Convertir page': '/convertir?url=http://mediatheque.accesmad.org/educmad/mod/page/view.php?id=26053'
-    }
+    },
+    conseil: 'Appelez /warmup une fois après le démarrage pour pré-charger le navigateur'
   });
 });
 
@@ -658,7 +696,8 @@ app.get('/health', (req, res) => {
     status: 'ok', 
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    chromiumReady: cachedExecutablePath !== null
+    browserReady: persistentBrowser !== null && persistentBrowser.isConnected(),
+    browserLocked: browserLock
   });
 });
 
@@ -674,24 +713,30 @@ function startKeepAlive() {
         console.error(`[${new Date().toISOString()}] Ping erreur:`, error.message);
       }
     }, PING_INTERVAL);
+    
+    setTimeout(async () => {
+      try {
+        console.log('Auto-warmup du navigateur...');
+        await getPersistentBrowser();
+        console.log('Navigateur prêt pour les conversions');
+      } catch (error) {
+        console.error('Erreur warmup:', error.message);
+      }
+    }, 5000);
   }
 }
 
-async function startServer() {
-  try {
-    console.log('Pré-initialisation de Chromium...');
-    await initChromium();
-    console.log('Chromium prêt!');
-  } catch (error) {
-    console.error('Erreur lors de l\'initialisation de Chromium:', error.message);
-  }
-  
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Serveur démarré sur le port ${PORT}`);
-    startKeepAlive();
-  });
-}
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Serveur démarré sur le port ${PORT}`);
+  startKeepAlive();
+});
 
-startServer();
+process.on('SIGTERM', async () => {
+  console.log('Arrêt du serveur...');
+  if (persistentBrowser) {
+    await persistentBrowser.close();
+  }
+  process.exit(0);
+});
 
 module.exports = app;
