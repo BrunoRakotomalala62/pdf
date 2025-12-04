@@ -1,56 +1,75 @@
 # API Scraper PDF Baccalauréat Madagascar
 
 ## Overview
-API Flask pour récupérer les PDFs des sujets du Baccalauréat de Madagascar depuis le site ACCESMAD (http://mediatheque.accesmad.org). L'API permet de scraper, filtrer et télécharger les sujets d'examen de 1999 à 2022.
+API Flask pour récupérer les PDFs des sujets et corrections du Baccalauréat de Madagascar depuis le site ACCESMAD (http://mediatheque.accesmad.org). L'API permet de scraper, filtrer et télécharger les sujets d'examen et leurs corrections.
 
 ## Fonctionnalités
 - Scraping automatique des titres et URLs des PDFs
+- Séparation entre sujets (énoncés) et corrections (corrigés)
 - Résolution des vraies URLs de PDF depuis les pages wrapper
-- Filtrage par matière (Mathématiques, Physique, etc.), série (A, C, D) et année
-- Récupération du contenu des pages avec extraction du texte depuis "Baccalauréat de l'enseignement général"
+- Filtrage par matière (Mathématiques, Physique, etc.), série (A, C, D), année et type
 - Conversion des pages HTML en PDF téléchargeables
 - Téléchargement direct des PDFs
 
 ## Endpoints API
 
 ### GET /
-Page d'accueil avec la liste des endpoints disponibles
-
-### GET /pdfs
-Retourne tous les PDFs disponibles au format JSON
-```json
-{
-  "total": 100,
-  "source": "http://mediatheque.accesmad.org/...",
-  "pdfs": [...]
-}
-```
+Page d'accueil avec la liste des endpoints disponibles et exemples d'utilisation
 
 ### GET /recherche
 Recherche avec filtres:
-- `pdf` : filtre par nom/matière (ex: Mathematiques)
+- `pdf` : filtre par nom/matière (ex: mathematiques, physique)
 - `serie` : filtre par série (A, C, D)
-- `annee` : filtre par année (1999-2022)
+- `annee` : filtre par année (ex: 2005, 2022)
+- `type` : filtre par type (`sujet` ou `correction`)
 
-Exemple: `/recherche?pdf=Mathematiques&serie=A`
+**Exemples:**
+```
+/recherche?pdf=mathematiques&serie=A&type=correction
+/recherche?pdf=mathematiques&serie=A&type=sujet
+/recherche?pdf=mathematiques&serie=A&type=correction&annee=2005
+/recherche?pdf=physique&serie=C&type=sujet
+```
 
-### GET /contenu
-Récupère le contenu textuel d'une page
-- `url` : URL de la page à récupérer
+**Réponse JSON:**
+```json
+{
+  "filtres": {
+    "pdf": "mathematiques",
+    "serie": "A",
+    "annee": "2005",
+    "type": "correction"
+  },
+  "total": 3,
+  "resultats": [
+    {
+      "titre": "Corrigé mathématiques exercice 1 série A 2005",
+      "annee": "2005",
+      "serie": "A",
+      "matiere": "Mathematiques",
+      "type": "correction",
+      "url_telechargement": "https://..."
+    }
+  ]
+}
+```
 
 ### GET /telecharger
 Télécharge un PDF directement
 - `url` : URL de la ressource à télécharger
+- `titre` : Titre pour le nom du fichier
 
-### GET /convertir
+### GET /capturer
 Convertit une page web en PDF téléchargeable
 - `url` : URL de la page à convertir
+- `titre` : Titre pour le nom du fichier
 
 ## Structure des fichiers
 ```
 ├── main.py           # Application Flask principale
 ├── requirements.txt  # Dépendances Python
-└── replit.md        # Documentation
+├── vercel.json       # Configuration Vercel (optionnel)
+└── replit.md         # Documentation
 ```
 
 ## Dépendances
@@ -58,14 +77,21 @@ Convertit une page web en PDF téléchargeable
 - requests 2.31.0
 - beautifulsoup4 4.12.2
 - gunicorn 21.2.0
+- PyPDF2
 - wkhtmltopdf (système) pour la conversion HTML vers PDF
 
 ## Démarrage
 ```bash
-python main.py
+gunicorn --bind=0.0.0.0:5000 --reuse-port main:app
 ```
 
 Le serveur démarre sur le port 5000.
 
-## Années disponibles
-Les sujets couvrent les années de 1999 à 2022 pour différentes séries (A, C, D) et matières.
+## Sources de données
+- Section 1: Énoncés/Sujets (http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=1)
+- Section 2: Corrigés/Corrections (http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=2)
+
+## Notes techniques
+- Les URLs de téléchargement sont directement utilisables sur téléphone
+- Certaines années anciennes (2000-2011) utilisent des pages HTML converties en PDF
+- L'API détecte automatiquement le type (sujet/correction) basé sur le titre et la section source
