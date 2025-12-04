@@ -10,6 +10,7 @@ API Flask pour récupérer les PDFs des sujets et corrections du Baccalauréat d
 - **Malagasy** (séries A, C-D, S, OSE) - id: 130
 - **Philosophie** (séries A, C-D, L) - id: 131
 - **Français** (séries A-C-D, L, S, OSE) - id: 134
+- **Anglais** (séries A, C-D, A-C-D (Remplacement), OSE) - id: 135
 
 ## Fonctionnalités
 - Scraping automatique des titres et URLs des PDFs
@@ -26,8 +27,8 @@ Page d'accueil avec la liste des endpoints et exemples
 
 ### GET /recherche
 Recherche avec filtres:
-- `pdf` : filtre par nom/matière (mathematiques, physique, hg, malagasy, philosophie, francais)
-- `serie` : filtre par série (A, C, D, L, S, OSE)
+- `pdf` : filtre par nom/matière (mathematiques, physique, hg, malagasy, philosophie, francais, anglais)
+- `serie` : filtre par série (A, C, D, L, S, OSE, A-C-D)
 - `annee` : filtre par année (1999 à 2023)
 - `type` : filtre par type (`sujet` ou `correction`)
 
@@ -102,6 +103,19 @@ Note: Les séries C et D partagent le même contenu pour Philosophie. La série 
 
 Note: Les séries A, C et D partagent le même contenu pour Français. Les séries L, S et OSE ne contiennent que les années 2022-2023.
 
+**Exemples Anglais:**
+```
+/recherche?pdf=anglais&serie=A&type=sujet
+/recherche?pdf=anglais&serie=A&type=sujet&annee=2016
+/recherche?pdf=anglais&serie=C&type=sujet
+/recherche?pdf=anglais&serie=D&type=sujet
+/recherche?pdf=anglais&serie=C&type=sujet&annee=2017
+/recherche?pdf=anglais&serie=ACD&type=sujet
+/recherche?pdf=anglais&serie=OSE&type=sujet
+```
+
+Note: Les séries C et D partagent le même contenu. La série A-C-D contient les sujets de Remplacement (2000, 2002). La série OSE ne contient que 2022.
+
 **Réponse JSON:**
 ```json
 {
@@ -167,6 +181,12 @@ Télécharge une page HTML convertie en PDF.
 - **Série S**: 2023 (PDF uniquement)
 - **Série OSE**: 2023 (PDF uniquement)
 
+### Anglais
+- **Série A**: 1999-2022 (2013-2022 en PDF, 1999-2011 en pages)
+- **Séries C-D**: 1999-2023 (2013-2023 en PDF, 1999-2011 en pages)
+- **Série A-C-D (Remplacement)**: 2000, 2002 (pages HTML)
+- **Série OSE**: 2022 (PDF uniquement)
+
 ## Structure des fichiers
 ```
 ├── main.py           # Application Flask principale
@@ -199,6 +219,10 @@ gunicorn --bind=0.0.0.0:5000 --reuse-port main:app
 - Philosophie séries C-D: Section 2 = Sujets et Corrections
 - Philosophie série L: Section 3 = Sujets et Corrections (+ L 2023 dans section 1)
 - Français séries A-C-D, L, S, OSE: Section 1 = Sujets
+- Anglais série A: Section 1 = Sujets et Corrections
+- Anglais séries C-D: Section 2 = Sujets et Corrections
+- Anglais série A-C-D (Remplacement): Section 3 = Sujets et Corrections
+- Anglais série OSE: Section 4 = Sujets et Corrections
 
 ## Notes techniques
 - Les URLs `/pdf/<id>` redirigent directement vers le PDF
@@ -224,6 +248,10 @@ COURSES = {
     'francais_acd': {'id': 134, 'name': 'Francais', 'serie': 'A-C-D', 'sections': {'sujet': 1, 'correction': 1}},
     'francais_l': {'id': 134, 'name': 'Francais', 'serie': 'L', 'sections': {'sujet': 1, 'correction': 1}},
     'francais_s': {'id': 134, 'name': 'Francais', 'serie': 'S', 'sections': {'sujet': 1, 'correction': 1}},
-    'francais_ose': {'id': 134, 'name': 'Francais', 'serie': 'OSE', 'sections': {'sujet': 1, 'correction': 1}}
+    'francais_ose': {'id': 134, 'name': 'Francais', 'serie': 'OSE', 'sections': {'sujet': 1, 'correction': 1}},
+    'anglais_a': {'id': 135, 'name': 'Anglais', 'serie': 'A', 'sections': {'sujet': 1, 'correction': 1}},
+    'anglais_cd': {'id': 135, 'name': 'Anglais', 'serie': 'C-D', 'sections': {'sujet': 2, 'correction': 2}},
+    'anglais_acd': {'id': 135, 'name': 'Anglais', 'serie': 'A-C-D', 'sections': {'sujet': 3, 'correction': 3}},
+    'anglais_ose': {'id': 135, 'name': 'Anglais', 'serie': 'OSE', 'sections': {'sujet': 4, 'correction': 4}}
 }
 ```
