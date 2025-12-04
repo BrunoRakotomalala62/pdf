@@ -150,7 +150,7 @@ async function convertPageToPdfBuffer(pageUrl) {
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       const resourceType = req.resourceType();
-      if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+      if (['stylesheet', 'font', 'media'].includes(resourceType)) {
         req.abort();
       } else {
         req.continue();
@@ -162,27 +162,107 @@ async function convertPageToPdfBuffer(pageUrl) {
       timeout: 25000
     });
     
-    await page.evaluate(() => {
-      const header = document.querySelector('#header, .navbar, nav');
-      const footer = document.querySelector('#footer, footer');
-      const sidebar = document.querySelector('.drawer, #nav-drawer');
-      if (header) header.style.display = 'none';
-      if (footer) footer.style.display = 'none';
-      if (sidebar) sidebar.style.display = 'none';
+    const extractionResult = await page.evaluate(() => {
+      let examTitle = document.title || '';
+      
+      const mainContentBox = document.querySelector('div[role="main"] .generalbox, div[role="main"] .box, #region-main .generalbox');
+      
+      if (mainContentBox) {
+        const contentDiv = mainContentBox.querySelector('.no-overflow') || mainContentBox;
+        const mainContent = contentDiv.innerHTML;
+        
+        const titleMatch = examTitle.match(/(Enonc[eé]|Corrig[eé]).*?(\d{4})/i);
+        const displayTitle = titleMatch ? titleMatch[0] : examTitle.split('|')[0].trim();
+        
+        document.body.innerHTML = `
+          <div style="font-family: 'Times New Roman', serif; max-width: 100%; padding: 10px; line-height: 1.5; font-size: 12pt;">
+            <h1 style="text-align: center; font-size: 16pt; margin-bottom: 20px;">${displayTitle}</h1>
+            ${mainContent}
+          </div>
+        `;
+        
+        document.querySelectorAll('a').forEach(link => {
+          if (link.textContent.toLowerCase().includes('corrig')) {
+            link.style.color = '#CC0000';
+          } else {
+            link.style.color = '#000';
+            link.style.textDecoration = 'none';
+          }
+        });
+        
+        document.querySelectorAll('img').forEach(img => {
+          img.style.maxWidth = '100%';
+          img.style.height = 'auto';
+        });
+        
+        return { success: true, title: displayTitle, method: 'generalbox' };
+      }
+      
+      const mainRole = document.querySelector('div[role="main"]');
+      if (mainRole) {
+        const selectorsToRemove = [
+          '.activity-header', '.activity-information', 
+          '.course-content-header', '.completion-info',
+          'nav', '.breadcrumb', '.navbar'
+        ];
+        
+        selectorsToRemove.forEach(selector => {
+          mainRole.querySelectorAll(selector).forEach(el => el.remove());
+        });
+        
+        const mainContent = mainRole.innerHTML;
+        
+        document.body.innerHTML = `
+          <div style="font-family: 'Times New Roman', serif; max-width: 100%; padding: 10px; line-height: 1.5; font-size: 12pt;">
+            ${mainContent}
+          </div>
+        `;
+        
+        return { success: true, title: examTitle.split('|')[0].trim(), method: 'role-main' };
+      }
+      
+      const regionMain = document.querySelector('#region-main');
+      if (regionMain) {
+        const selectorsToRemove = [
+          '.activity-header', '.activity-information',
+          '.course-content-header', 'nav', '.breadcrumb'
+        ];
+        
+        selectorsToRemove.forEach(selector => {
+          regionMain.querySelectorAll(selector).forEach(el => el.remove());
+        });
+        
+        document.body.innerHTML = `
+          <div style="font-family: 'Times New Roman', serif; max-width: 100%; padding: 10px; line-height: 1.5;">
+            ${regionMain.innerHTML}
+          </div>
+        `;
+        
+        return { success: true, title: examTitle.split('|')[0].trim(), method: 'region-main' };
+      }
+      
+      return { success: false, title: 'Contenu non trouvé', method: 'fallback' };
     });
+    
+    console.log('Extraction:', extractionResult);
     
     const pdfBuffer = await page.pdf({
       format: 'A4',
       printBackground: true,
       margin: {
-        top: '20mm',
+        top: '15mm',
         right: '15mm',
-        bottom: '20mm',
+        bottom: '15mm',
         left: '15mm'
       }
     });
     
-    return pdfBuffer;
+    return {
+      buffer: pdfBuffer,
+      title: extractionResult.title,
+      success: extractionResult.success,
+      method: extractionResult.method
+    };
   } finally {
     if (page) {
       try { await page.close(); } catch (e) { }
@@ -632,20 +712,24 @@ app.get('/convertir', async (req, res) => {
     console.log(`Conversion en PDF: ${pageUrl}`);
     const startTime = Date.now();
     
-    const pdfBuffer = await convertPageToPdfBuffer(pageUrl);
+    const result = await convertPageToPdfBuffer(pageUrl);
     
     const duration = Date.now() - startTime;
     console.log(`PDF généré en ${duration}ms`);
     
     const pdfId = generatePdfId();
-    const filename = pageUrl.includes('id=') 
-      ? `educmad_${pageUrl.split('id=')[1].split('&')[0]}.pdf`
-      : 'document.pdf';
+    
+    const cleanTitle = result.title
+      .replace(/[<>:"/\\|?*]/g, '')
+      .replace(/\s+/g, '_')
+      .substring(0, 50);
+    const filename = cleanTitle ? `${cleanTitle}.pdf` : 'document.pdf';
     
     pdfCache.set(pdfId, {
-      buffer: Buffer.from(pdfBuffer),
+      buffer: Buffer.from(result.buffer),
       filename: filename,
       sourceUrl: pageUrl,
+      title: result.title,
       createdAt: Date.now()
     });
     
@@ -654,11 +738,11 @@ app.get('/convertir', async (req, res) => {
     res.json({
       success: true,
       message: 'PDF converti avec succes',
-      titre: filename.replace('.pdf', ''),
+      titre: result.title,
       type: 'PDF converti',
       url_source: pageUrl,
       url_pdf: `${baseUrl}/download/${pdfId}`,
-      taille: Buffer.from(pdfBuffer).length,
+      taille: Buffer.from(result.buffer).length,
       duree_conversion_ms: duration,
       expire_dans: '10 minutes'
     });
