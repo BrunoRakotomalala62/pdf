@@ -5,6 +5,9 @@ const cheerio = require('cheerio');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL;
+const PING_INTERVAL = 14 * 60 * 1000;
+
 const BASE_URL = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=819';
 const BASE_URL_CORRECTIONS = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=819&section=2';
 const BASE_URL_MATHS = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=1';
@@ -585,8 +588,32 @@ app.get('/', (req, res) => {
   });
 });
 
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+function startKeepAlive() {
+  if (RENDER_EXTERNAL_URL) {
+    console.log(`Auto-ping activé pour: ${RENDER_EXTERNAL_URL}`);
+    
+    setInterval(async () => {
+      try {
+        const response = await axios.get(`${RENDER_EXTERNAL_URL}/health`);
+        console.log(`[${new Date().toISOString()}] Ping OK - Status: ${response.status}`);
+      } catch (error) {
+        console.error(`[${new Date().toISOString()}] Ping erreur:`, error.message);
+      }
+    }, PING_INTERVAL);
+  }
+}
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Serveur démarré sur le port ${PORT}`);
+  startKeepAlive();
 });
 
 module.exports = app;
