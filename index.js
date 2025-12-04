@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -16,10 +17,28 @@ const BASE_URL_MATHS_CORRECTIONS = 'http://mediatheque.accesmad.org/educmad/cour
 const isReplit = process.env.REPL_ID !== undefined || process.env.REPLIT !== undefined;
 const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV !== undefined;
 
+const pdfCache = new Map();
+const PDF_CACHE_DURATION = 10 * 60 * 1000;
+
 let persistentBrowser = null;
 let browserLock = false;
 let lastBrowserActivity = Date.now();
 const BROWSER_IDLE_TIMEOUT = 5 * 60 * 1000;
+
+function generatePdfId() {
+  return crypto.randomBytes(8).toString('hex');
+}
+
+function cleanExpiredPdfs() {
+  const now = Date.now();
+  for (const [id, data] of pdfCache.entries()) {
+    if (now - data.createdAt > PDF_CACHE_DURATION) {
+      pdfCache.delete(id);
+    }
+  }
+}
+
+setInterval(cleanExpiredPdfs, 60000);
 
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -117,7 +136,7 @@ if (!isVercel) {
   setInterval(closeBrowserIfIdle, 60000);
 }
 
-async function convertPageToPdf(pageUrl) {
+async function convertPageToPdfBuffer(pageUrl) {
   await waitForBrowserLock();
   
   let browser = null;
@@ -613,22 +632,36 @@ app.get('/convertir', async (req, res) => {
     console.log(`Conversion en PDF: ${pageUrl}`);
     const startTime = Date.now();
     
-    const pdfBuffer = await convertPageToPdf(pageUrl);
+    const pdfBuffer = await convertPageToPdfBuffer(pageUrl);
     
     const duration = Date.now() - startTime;
     console.log(`PDF généré en ${duration}ms`);
     
+    const pdfId = generatePdfId();
     const filename = pageUrl.includes('id=') 
-      ? `educmad_${pageUrl.split('id=')[1]}.pdf`
+      ? `educmad_${pageUrl.split('id=')[1].split('&')[0]}.pdf`
       : 'document.pdf';
     
-    const buffer = Buffer.from(pdfBuffer);
+    pdfCache.set(pdfId, {
+      buffer: Buffer.from(pdfBuffer),
+      filename: filename,
+      sourceUrl: pageUrl,
+      createdAt: Date.now()
+    });
     
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Length', buffer.length);
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
     
-    res.end(buffer);
+    res.json({
+      success: true,
+      message: 'PDF converti avec succes',
+      titre: filename.replace('.pdf', ''),
+      type: 'PDF converti',
+      url_source: pageUrl,
+      url_pdf: `${baseUrl}/download/${pdfId}`,
+      taille: Buffer.from(pdfBuffer).length,
+      duree_conversion_ms: duration,
+      expire_dans: '10 minutes'
+    });
     
   } catch (error) {
     console.error('Erreur conversion PDF:', error.message);
@@ -638,6 +671,25 @@ app.get('/convertir', async (req, res) => {
       message: error.message
     });
   }
+});
+
+app.get('/download/:id', (req, res) => {
+  const pdfId = req.params.id;
+  const pdfData = pdfCache.get(pdfId);
+  
+  if (!pdfData) {
+    return res.status(404).json({
+      success: false,
+      error: 'PDF non trouve ou expire',
+      message: 'Le PDF demande n\'existe pas ou a expire. Veuillez le reconvertir.'
+    });
+  }
+  
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${pdfData.filename}"`);
+  res.setHeader('Content-Length', pdfData.buffer.length);
+  
+  res.end(pdfData.buffer);
 });
 
 app.get('/warmup', async (req, res) => {
@@ -650,7 +702,7 @@ app.get('/warmup', async (req, res) => {
     }
     res.json({ 
       success: true, 
-      message: 'Navigateur prêt',
+      message: 'Navigateur pret',
       browserReady: ready
     });
   } catch (error) {
@@ -666,9 +718,10 @@ app.get('/', (req, res) => {
     message: 'API Scraper PDF EDUCMAD',
     environment: isReplit ? 'Replit' : (isVercel ? 'Vercel' : 'Other'),
     routes: {
-      '/recherche': 'Rechercher les PDFs (sujets PC, corrections PC, mathématiques, corrections mathématiques)',
-      '/convertir': 'Convertir une page HTML en PDF',
-      '/warmup': 'Pré-charger le navigateur pour des conversions plus rapides'
+      '/recherche': 'Rechercher les PDFs (sujets PC, corrections PC, mathematiques, corrections mathematiques)',
+      '/convertir': 'Convertir une page HTML en PDF (retourne JSON avec URL de telechargement)',
+      '/download/:id': 'Telecharger un PDF converti',
+      '/warmup': 'Pre-charger le navigateur pour des conversions plus rapides'
     },
     exemples: {
       'Sujets_PC': {
@@ -691,7 +744,10 @@ app.get('/', (req, res) => {
         'Avec lien direct': '/recherche?pdf=cor Math A 2023&direct=true',
         'Toutes les corrections Math': '/recherche?pdf=cor Math A liste'
       },
-      'Convertir page': '/convertir?url=http://mediatheque.accesmad.org/educmad/mod/page/view.php?id=26053'
+      'Convertir_page': {
+        'Convertir': '/convertir?url=http://mediatheque.accesmad.org/educmad/mod/page/view.php?id=26053',
+        'Reponse': 'JSON avec url_pdf pour telecharger'
+      }
     }
   });
 });
@@ -703,13 +759,14 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     environment: isReplit ? 'Replit' : (isVercel ? 'Vercel' : 'Other'),
     browserReady: !isVercel && persistentBrowser !== null && persistentBrowser.isConnected(),
-    browserLocked: browserLock
+    browserLocked: browserLock,
+    pdfsEnCache: pdfCache.size
   });
 });
 
 function startKeepAlive() {
   if (RENDER_EXTERNAL_URL) {
-    console.log(`Auto-ping activé pour: ${RENDER_EXTERNAL_URL}`);
+    console.log(`Auto-ping active pour: ${RENDER_EXTERNAL_URL}`);
     
     setInterval(async () => {
       try {
@@ -724,7 +781,7 @@ function startKeepAlive() {
       try {
         console.log('Auto-warmup du navigateur...');
         await getPersistentBrowser();
-        console.log('Navigateur prêt pour les conversions');
+        console.log('Navigateur pret pour les conversions');
       } catch (error) {
         console.error('Erreur warmup:', error.message);
       }
@@ -734,13 +791,13 @@ function startKeepAlive() {
 
 if (!isVercel) {
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Serveur démarré sur le port ${PORT}`);
+    console.log(`Serveur demarre sur le port ${PORT}`);
     startKeepAlive();
   });
 }
 
 process.on('SIGTERM', async () => {
-  console.log('Arrêt du serveur...');
+  console.log('Arret du serveur...');
   if (persistentBrowser) {
     await persistentBrowser.close();
   }
