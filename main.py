@@ -516,6 +516,18 @@ def recherche():
         'resultats': resultats
     })
 
+def is_error_page(html_content):
+    error_indicators = [
+        'Identifiant de module de cours non valide',
+        '<title>Erreur',
+        'errorbox',
+        'error-content'
+    ]
+    for indicator in error_indicators:
+        if indicator in html_content:
+            return True
+    return False
+
 @app.route('/pdf/<resource_id>')
 def download_pdf(resource_id):
     if not resource_id or not resource_id.isdigit():
@@ -526,22 +538,31 @@ def download_pdf(resource_id):
     
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        
         response = requests.get(resource_url, timeout=30, allow_redirects=True, headers=headers)
         response.encoding = 'utf-8'
         
         if 'application/pdf' in response.headers.get('Content-Type', ''):
             return redirect(response.url)
         
-        pdf_url, error = resolve_pdf_url(resource_url)
+        resource_is_error = is_error_page(response.text)
         
-        if pdf_url:
-            return redirect(pdf_url)
+        if not resource_is_error:
+            pdf_url, error = resolve_pdf_url(resource_url)
+            if pdf_url:
+                return redirect(pdf_url)
+        
+        page_response = requests.get(page_url, timeout=30, allow_redirects=True, headers=headers)
+        page_response.encoding = 'utf-8'
+        page_is_valid = not is_error_page(page_response.text)
         
         if WKHTMLTOPDF_AVAILABLE:
-            pdf_path, capture_error = capture_page_as_pdf(resource_url)
-            
-            if not pdf_path:
+            if page_is_valid:
                 pdf_path, capture_error = capture_page_as_pdf(page_url)
+            elif not resource_is_error:
+                pdf_path, capture_error = capture_page_as_pdf(resource_url)
+            else:
+                return jsonify({'error': 'Ressource non trouvée', 'id': resource_id}), 404
             
             if pdf_path and os.path.exists(pdf_path):
                 def generate():
