@@ -34,6 +34,8 @@ def clean_filename(titre):
 app.config['JSON_AS_ASCII'] = False
 
 BASE_URL = "http://mediatheque.accesmad.org/educmad/course/view.php?id=817"
+SECTION_SUJET = "&section=1"
+SECTION_CORRECTION = "&section=2"
 ALLOWED_DOMAINS = ['mediatheque.accesmad.org', 'accesmad.org']
 
 PAGE_YEARS = ['2000', '2002', '2003', '2005', '2006', '2007', '2008', '2009', '2011']
@@ -137,10 +139,48 @@ def resolve_pdf_url(resource_url):
     except Exception as e:
         return None, str(e)
 
-def scrape_pdfs():
+def detect_type_from_title(text):
+    text_lower = text.lower()
+    if 'corrigé' in text_lower or 'corrige' in text_lower or 'correction' in text_lower:
+        return 'correction'
+    elif 'énoncé' in text_lower or 'enonce' in text_lower or 'sujet' in text_lower:
+        return 'sujet'
+    return None
+
+def extract_serie(text):
+    text_lower = text.lower()
+    if 'série a' in text_lower or 'serie a' in text_lower or ' a ' in text_lower:
+        return 'A'
+    elif 'série c' in text_lower or 'serie c' in text_lower or ' c ' in text_lower:
+        return 'C'
+    elif 'série d' in text_lower or 'serie d' in text_lower or ' d ' in text_lower:
+        return 'D'
+    return None
+
+def extract_subject(text):
+    text_lower = text.lower()
+    if 'math' in text_lower:
+        return 'Mathematiques'
+    elif 'physique' in text_lower:
+        return 'Physique'
+    elif 'svt' in text_lower or 'science' in text_lower:
+        return 'SVT'
+    elif 'français' in text_lower or 'francais' in text_lower:
+        return 'Francais'
+    elif 'anglais' in text_lower:
+        return 'Anglais'
+    elif 'philo' in text_lower:
+        return 'Philosophie'
+    elif 'histoire' in text_lower or 'géo' in text_lower or 'geo' in text_lower:
+        return 'Histoire-Geo'
+    elif 'malagasy' in text_lower:
+        return 'Malagasy'
+    return None
+
+def scrape_section(url, default_type):
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        response = requests.get(BASE_URL, timeout=30, headers=headers)
+        response = requests.get(url, timeout=30, headers=headers)
         response.encoding = 'utf-8'
         soup = BeautifulSoup(response.text, 'html.parser')
         
@@ -156,32 +196,9 @@ def scrape_pdfs():
                 year_match = re.search(r'(19\d{2}|20\d{2})', text)
                 year = year_match.group(1) if year_match else None
                 
-                serie = None
-                text_lower = text.lower()
-                if 'série a' in text_lower or 'serie a' in text_lower:
-                    serie = 'A'
-                elif 'série c' in text_lower or 'serie c' in text_lower:
-                    serie = 'C'
-                elif 'série d' in text_lower or 'serie d' in text_lower:
-                    serie = 'D'
-                
-                subject = None
-                if 'math' in text_lower:
-                    subject = 'Mathematiques'
-                elif 'physique' in text_lower:
-                    subject = 'Physique'
-                elif 'svt' in text_lower or 'science' in text_lower:
-                    subject = 'SVT'
-                elif 'français' in text_lower or 'francais' in text_lower:
-                    subject = 'Francais'
-                elif 'anglais' in text_lower:
-                    subject = 'Anglais'
-                elif 'philo' in text_lower:
-                    subject = 'Philosophie'
-                elif 'histoire' in text_lower or 'géo' in text_lower:
-                    subject = 'Histoire-Geo'
-                elif 'malagasy' in text_lower:
-                    subject = 'Malagasy'
+                serie = extract_serie(text)
+                subject = extract_subject(text)
+                doc_type = detect_type_from_title(text) or default_type
                 
                 if text and href:
                     full_url = href if href.startswith('http') else f"http://mediatheque.accesmad.org{href}"
@@ -195,12 +212,28 @@ def scrape_pdfs():
                             'annee': year,
                             'serie': serie,
                             'matiere': subject,
-                            'type': 'page' if is_page else 'pdf'
+                            'type_doc': doc_type,
+                            'format': 'page' if is_page else 'pdf'
                         })
         
         return pdfs
     except Exception as e:
         return {'error': str(e)}
+
+def scrape_all_pdfs():
+    all_pdfs = []
+    
+    sujets_url = BASE_URL + SECTION_SUJET
+    sujets = scrape_section(sujets_url, 'sujet')
+    if isinstance(sujets, list):
+        all_pdfs.extend(sujets)
+    
+    corrections_url = BASE_URL + SECTION_CORRECTION
+    corrections = scrape_section(corrections_url, 'correction')
+    if isinstance(corrections, list):
+        all_pdfs.extend(corrections)
+    
+    return all_pdfs
 
 def capture_page_as_pdf(url):
     if not WKHTMLTOPDF_AVAILABLE:
@@ -338,12 +371,20 @@ def home():
     return jsonify({
         'message': 'API Baccalauréat Madagascar - Téléchargement PDF',
         'endpoints': {
-            '/recherche': 'Recherche et téléchargement des sujets de bac',
+            '/recherche': 'Recherche et téléchargement des sujets et corrections de bac',
             '/capturer': 'Télécharge une page en PDF (capture)'
         },
+        'parametres': {
+            'pdf': 'Filtre par matière (mathematiques, physique, svt, etc.)',
+            'serie': 'Filtre par série (A, C, D)',
+            'annee': 'Filtre par année (2005, 2009, 2022, etc.)',
+            'type': 'Filtre par type (sujet ou correction)'
+        },
         'exemples': {
+            'Corrections maths série A': f'{base_url}/recherche?pdf=mathematiques&serie=A&type=correction',
+            'Sujets maths série A': f'{base_url}/recherche?pdf=mathematiques&serie=A&type=sujet',
+            'Correction maths série A 2005': f'{base_url}/recherche?pdf=mathematiques&serie=A&type=correction&annee=2005',
             'Tous les maths série A': f'{base_url}/recherche?pdf=mathematiques&serie=A',
-            'Maths série A année 2009': f'{base_url}/recherche?pdf=mathematiques&serie=A&annee=2009',
             'Physique série C': f'{base_url}/recherche?pdf=physique&serie=C'
         },
         'note': 'Les URLs retournées sont directement téléchargeables sur votre téléphone'
@@ -354,10 +395,11 @@ def recherche():
     pdf_filter = request.args.get('pdf', '').lower()
     serie_filter = request.args.get('serie', '').upper()
     annee_filter = request.args.get('annee', '')
+    type_filter = request.args.get('type', '').lower()
     
     base_url = get_api_base_url()
     
-    pdfs = scrape_pdfs()
+    pdfs = scrape_all_pdfs()
     
     if isinstance(pdfs, dict) and 'error' in pdfs:
         return jsonify(pdfs), 500
@@ -378,13 +420,19 @@ def recherche():
         if annee_filter and pdf['annee'] != annee_filter:
             match = False
         
+        if type_filter:
+            if type_filter not in ['sujet', 'correction']:
+                match = False
+            elif pdf['type_doc'] != type_filter:
+                match = False
+        
         if match:
             annee = pdf['annee']
             url_source = pdf['url']
             titre = pdf['titre']
             titre_encoded = quote(titre, safe='')
             
-            if annee in PAGE_YEARS or pdf['type'] == 'page':
+            if annee in PAGE_YEARS or pdf['format'] == 'page':
                 url_telechargement = f"{base_url}/capturer?url={url_source}&titre={titre_encoded}"
             else:
                 url_telechargement = f"{base_url}/telecharger?url={url_source}&titre={titre_encoded}"
@@ -394,6 +442,7 @@ def recherche():
                 'annee': annee,
                 'serie': pdf['serie'],
                 'matiere': pdf['matiere'],
+                'type': pdf['type_doc'],
                 'url_telechargement': url_telechargement
             })
     
@@ -401,7 +450,8 @@ def recherche():
         'filtres': {
             'pdf': pdf_filter or None,
             'serie': serie_filter or None,
-            'annee': annee_filter or None
+            'annee': annee_filter or None,
+            'type': type_filter or None
         },
         'total': len(resultats),
         'resultats': resultats
