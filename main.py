@@ -443,17 +443,24 @@ def recherche():
             
             if annee in PAGE_YEARS or pdf['format'] == 'page':
                 url_telechargement = f"{base_url}/capturer?url={url_encoded}&titre={titre_encoded}"
+                url_pdf_direct = None
             else:
                 url_telechargement = f"{base_url}/telecharger?url={url_encoded}&titre={titre_encoded}"
+                pdf_url, error = resolve_pdf_url(url_source)
+                url_pdf_direct = pdf_url if pdf_url else None
             
-            resultats.append({
+            result_item = {
                 'titre': titre,
                 'annee': annee,
                 'serie': pdf['serie'],
                 'matiere': pdf['matiere'],
                 'type': pdf['type_doc'],
                 'url_telechargement': url_telechargement
-            })
+            }
+            if url_pdf_direct:
+                result_item['url_pdf_direct'] = url_pdf_direct
+            
+            resultats.append(result_item)
     
     return jsonify({
         'filtres': {
