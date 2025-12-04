@@ -14,7 +14,7 @@
     "axios": "^1.7.7",
     "cheerio": "^1.1.2",
     "express": "^4.22.1",
-    "puppeteer-core": "^21.11.0",
-    "@sparticuz/chromium-min": "^121.0.0"
+    "puppeteer-core": "^22.6.4",
+    "@sparticuz/chromium-min": "^123.0.1"
   }
 }

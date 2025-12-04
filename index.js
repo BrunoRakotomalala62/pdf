@@ -12,54 +12,53 @@ const BASE_URL_MATHS_CORRECTIONS = 'http://mediatheque.accesmad.org/educmad/cour
 
 const isReplit = process.env.REPL_ID !== undefined || process.env.REPLIT !== undefined;
 
-let browser = null;
-
-async function getBrowser() {
-  if (!browser || !browser.isConnected()) {
-    const puppeteerCore = require('puppeteer-core');
+async function createBrowser() {
+  const puppeteerCore = require('puppeteer-core');
+  
+  if (isReplit) {
+    return await puppeteerCore.launch({
+      headless: 'new',
+      executablePath: '/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-software-rasterizer'
+      ]
+    });
+  } else {
+    const chromium = require('@sparticuz/chromium-min');
+    chromium.setGraphicsMode = false;
     
-    if (isReplit) {
-      browser = await puppeteerCore.launch({
-        headless: 'new',
-        executablePath: '/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium',
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-          '--disable-software-rasterizer'
-        ]
-      });
-    } else {
-      const chromium = require('@sparticuz/chromium-min');
-      
-      browser = await puppeteerCore.launch({
-        args: [
-          ...chromium.args,
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--single-process',
-          '--hide-scrollbars',
-          '--disable-web-security'
-        ],
-        defaultViewport: chromium.defaultViewport,
-        executablePath: await chromium.executablePath(
-          'https://github.com/Sparticuz/chromium/releases/download/v121.0.0/chromium-v121.0.0-pack.tar'
-        ),
-        headless: chromium.headless,
-        ignoreHTTPSErrors: true,
-      });
-    }
+    return await puppeteerCore.launch({
+      args: [
+        ...chromium.args,
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--single-process',
+        '--hide-scrollbars',
+        '--disable-web-security'
+      ],
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(
+        'https://github.com/Sparticuz/chromium/releases/download/v123.0.1/chromium-v123.0.1-pack.tar'
+      ),
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
+    });
   }
-  return browser;
 }
 
 async function convertPageToPdf(pageUrl) {
-  const browserInstance = await getBrowser();
-  const page = await browserInstance.newPage();
+  let browser = null;
+  let page = null;
   
   try {
+    browser = await createBrowser();
+    page = await browser.newPage();
+    
     await page.goto(pageUrl, { 
       waitUntil: 'networkidle2',
       timeout: 30000
@@ -87,7 +86,8 @@ async function convertPageToPdf(pageUrl) {
     
     return pdfBuffer;
   } finally {
-    await page.close();
+    if (page) await page.close();
+    if (browser) await browser.close();
   }
 }
 
@@ -583,13 +583,6 @@ app.get('/', (req, res) => {
       'Convertir page': '/convertir?url=http://mediatheque.accesmad.org/educmad/mod/page/view.php?id=26053'
     }
   });
-});
-
-process.on('SIGTERM', async () => {
-  if (browser) {
-    await browser.close();
-  }
-  process.exit(0);
 });
 
 app.listen(PORT, '0.0.0.0', () => {
