@@ -191,24 +191,49 @@ def get_page_content_for_pdf(url):
         for script in soup(['script', 'style', 'nav', 'header', 'footer']):
             script.decompose()
         
-        content_div = soup.find('div', class_='region-content') or soup.find('div', id='region-main') or soup.find('div', class_='content')
+        content_div = None
+        for selector in ['div.box.py-3.generalbox', 'div#region-main-box', 'div.region-content', 'div#region-main', 'div.content', 'section#region-main']:
+            if '.' in selector:
+                parts = selector.split('.')
+                tag = parts[0]
+                classes = parts[1:]
+                content_div = soup.find(tag, class_=lambda x: x and all(c in x.split() for c in classes))
+            elif '#' in selector:
+                parts = selector.split('#')
+                content_div = soup.find(parts[0], id=parts[1])
+            else:
+                content_div = soup.find(selector)
+            if content_div:
+                break
         
         if content_div:
             text = content_div.get_text(separator='\n', strip=True)
         else:
             text = soup.get_text(separator='\n', strip=True)
         
-        start_marker = "Baccalauréat de l'enseignement général"
-        alt_marker = "Baccalauréat"
+        start_markers = [
+            "Baccalauréat de l'enseignement général",
+            "Baccalauréat de l'enseignement",
+            "BACCALAURÉAT",
+            "Baccalauréat"
+        ]
         
-        start_idx = text.find(start_marker)
-        if start_idx == -1:
-            start_idx = text.find(alt_marker)
+        start_idx = -1
+        for marker in start_markers:
+            start_idx = text.find(marker)
+            if start_idx != -1:
+                break
         
         if start_idx != -1:
             text = text[start_idx:]
         
-        return text
+        end_markers = ["Modifié le:", "Dernière modification", "Navigation"]
+        for end_marker in end_markers:
+            end_idx = text.find(end_marker)
+            if end_idx != -1:
+                text = text[:end_idx]
+        
+        return text.strip()
     except Exception as e:
         return f"Erreur: {str(e)}"
 
