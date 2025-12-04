@@ -7,8 +7,29 @@ import tempfile
 import os
 from urllib.parse import urlparse, quote, unquote
 import unicodedata
+import threading
+import time
+from datetime import datetime
 
 app = Flask(__name__)
+
+RENDER_URL = os.environ.get('RENDER_EXTERNAL_URL', 'https://pdf-0r0j.onrender.com')
+PING_INTERVAL = 840
+
+def keep_alive():
+    while True:
+        try:
+            time.sleep(PING_INTERVAL)
+            response = requests.get(f"{RENDER_URL}/health", timeout=30)
+            print(f"[Keep-Alive] Ping sent at {datetime.now().isoformat()} - Status: {response.status_code}")
+        except Exception as e:
+            print(f"[Keep-Alive] Ping failed at {datetime.now().isoformat()}: {e}")
+
+def start_keep_alive():
+    if os.environ.get('RENDER') or os.environ.get('RENDER_EXTERNAL_URL'):
+        thread = threading.Thread(target=keep_alive, daemon=True)
+        thread.start()
+        print(f"[Keep-Alive] Auto-ping started for {RENDER_URL} (every {PING_INTERVAL}s)")
 
 def clean_filename(titre):
     if not titre:
@@ -963,6 +984,23 @@ def telecharger_pdf():
         return jsonify({'error': 'Timeout lors du téléchargement'}), 504
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/health')
+def health():
+    return jsonify({
+        'status': 'ok',
+        'timestamp': datetime.now().isoformat(),
+        'service': 'API Baccalauréat Madagascar'
+    }), 200
+
+@app.route('/ping')
+def ping():
+    return jsonify({
+        'status': 'pong',
+        'timestamp': datetime.now().isoformat()
+    }), 200
+
+start_keep_alive()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
