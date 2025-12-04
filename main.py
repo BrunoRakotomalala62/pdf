@@ -762,27 +762,122 @@ def capture_page_as_pdf(url):
         return None, "wkhtmltopdf non disponible"
     
     try:
-        pdf_path = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, timeout=30, headers=headers)
+        response.encoding = 'utf-8'
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        elements_to_remove = [
+            'footer',
+            'nav',
+            'header',
+            '.navbar',
+            '#page-footer',
+            '.footer',
+            '.logininfo',
+            '.modifiedinfo',
+            '#page-header',
+            '.drawer',
+            '.usermenu',
+            '.accesshide',
+            '.skip-block',
+            '.nav-item',
+            '.breadcrumb',
+            '#nav-drawer',
+            '.secondary-navigation',
+            '.primary-navigation',
+            '.page-context-header',
+            '[data-region="drawer"]',
+        ]
+        
+        for selector in elements_to_remove:
+            for element in soup.select(selector):
+                element.decompose()
+        
+        for text in soup.find_all(string=re.compile(r'Modifié le:|Fourni par Moodle|Copyright.*Educmad|Contacter l\'assistance|connecté anonymement|conservation de données|Obtenir l\'app mobile', re.I)):
+            parent = text.find_parent()
+            if parent:
+                parent.decompose()
+        
+        for a_tag in soup.find_all('a'):
+            if a_tag.get('href', '').startswith(('javascript:', '#')) or 'Connexion' in a_tag.get_text():
+                a_tag.decompose()
+        
+        content_div = None
+        for selector in ['div.box.generalbox', 'div#region-main', 'section#region-main', '.course-content']:
+            content_div = soup.select_one(selector)
+            if content_div:
+                break
+        
+        if content_div:
+            html_content = str(content_div)
+        else:
+            body = soup.find('body')
+            html_content = str(body) if body else str(soup)
+        
+        clean_html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {{
+            font-family: 'Times New Roman', Times, serif;
+            font-size: 12pt;
+            line-height: 1.5;
+            padding: 20px;
+            max-width: 100%;
+            background: white;
+        }}
+        img {{
+            max-width: 100%;
+            height: auto;
+        }}
+        table {{
+            border-collapse: collapse;
+            width: 100%;
+            margin: 10px 0;
+        }}
+        td, th {{
+            border: 1px solid #333;
+            padding: 8px;
+        }}
+        .no-overflow {{
+            overflow: visible !important;
+        }}
+        footer, nav, .footer, .navbar, .logininfo, .breadcrumb {{
+            display: none !important;
+        }}
+    </style>
+</head>
+<body>
+    {html_content}
+</body>
+</html>"""
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as html_file:
+            html_file.write(clean_html)
+            html_path = html_file.name
+        
+        pdf_path = html_path.replace('.html', '.pdf')
         
         result = subprocess.run(
             ['wkhtmltopdf', 
              '--quiet',
              '--encoding', 'utf-8',
              '--page-size', 'A4',
-             '--margin-top', '10mm',
-             '--margin-bottom', '10mm',
-             '--margin-left', '10mm',
-             '--margin-right', '10mm',
-             '--javascript-delay', '2000',
-             '--no-stop-slow-scripts',
+             '--margin-top', '15mm',
+             '--margin-bottom', '15mm',
+             '--margin-left', '15mm',
+             '--margin-right', '15mm',
              '--enable-local-file-access',
              '--disable-smart-shrinking',
              '--zoom', '1.0',
-             '--print-media-type',
-             url, pdf_path],
+             html_path, pdf_path],
             capture_output=True,
             timeout=120
         )
+        
+        os.unlink(html_path)
         
         if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
             return pdf_path, None
