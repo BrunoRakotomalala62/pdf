@@ -2,12 +2,9 @@ flask==3.0.0
 requests==2.31.0
 beautifulsoup4==4.12.2
 gunicorn==21.2.0
-beautifulsoup4
-flask
-gunicorn
-requests
-beautifulsoup4
-flask
-gunicorn
-requests
 PyPDF2
+beautifulsoup4
+flask
+gunicorn
+PyPDF2
+requests
