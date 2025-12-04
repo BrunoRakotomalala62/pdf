@@ -124,7 +124,7 @@ def scrape_pdfs():
             href = link.get('href', '')
             text = link.get_text(strip=True)
             
-            if '.pdf' in href.lower() or 'resource' in href.lower() or 'mod/resource' in href:
+            if '.pdf' in href.lower() or 'resource' in href.lower() or 'mod/resource' in href or 'mod/page' in href or 'page/view' in href:
                 year_match = re.search(r'(19\d{2}|20\d{2})', text)
                 year = year_match.group(1) if year_match else None
                 
