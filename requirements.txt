@@ -6,3 +6,7 @@ beautifulsoup4
 flask
 gunicorn
 requests
+beautifulsoup4
+flask
+gunicorn
+requests
