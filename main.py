@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, Response
+from flask import Flask, jsonify, request, Response, redirect
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -379,8 +379,8 @@ def home():
     return jsonify({
         'message': 'API Baccalauréat Madagascar - Téléchargement PDF',
         'endpoints': {
-            '/recherche': 'Recherche et téléchargement des sujets et corrections de bac',
-            '/capturer': 'Télécharge une page en PDF (capture)'
+            '/recherche': 'Recherche des sujets et corrections de bac',
+            '/pdf/<id>': 'Télécharge un PDF directement (redirige vers le fichier)'
         },
         'parametres': {
             'pdf': 'Filtre par matière (mathematiques, physique, svt, etc.)',
@@ -391,11 +391,10 @@ def home():
         'exemples': {
             'Corrections maths série A': f'{base_url}/recherche?pdf=mathematiques&serie=A&type=correction',
             'Sujets maths série A': f'{base_url}/recherche?pdf=mathematiques&serie=A&type=sujet',
-            'Correction maths série A 2005': f'{base_url}/recherche?pdf=mathematiques&serie=A&type=correction&annee=2005',
-            'Tous les maths série A': f'{base_url}/recherche?pdf=mathematiques&serie=A',
-            'Physique série C': f'{base_url}/recherche?pdf=physique&serie=C'
+            'Correction maths série A 2023': f'{base_url}/recherche?pdf=mathematiques&serie=A&type=correction&annee=2023',
+            'Télécharger PDF directement': f'{base_url}/pdf/57064'
         },
-        'note': 'Les URLs retournées sont directement téléchargeables sur votre téléphone'
+        'utilisation': 'Faites une recherche, puis cliquez sur url_telechargement pour télécharger le PDF'
     })
 
 @app.route('/recherche')
@@ -438,29 +437,24 @@ def recherche():
             annee = pdf['annee']
             url_source = pdf['url']
             titre = pdf['titre']
-            url_encoded = quote(url_source, safe='')
-            titre_encoded = quote(titre, safe='')
+            
+            id_match = re.search(r'id=(\d+)', url_source)
+            resource_id = id_match.group(1) if id_match else None
             
             if annee in PAGE_YEARS or pdf['format'] == 'page':
-                url_telechargement = f"{base_url}/capturer?url={url_encoded}&titre={titre_encoded}"
-                url_pdf_direct = None
+                url_telechargement = f"{base_url}/pdf/{resource_id}" if resource_id else None
             else:
-                url_telechargement = f"{base_url}/telecharger?url={url_encoded}&titre={titre_encoded}"
-                pdf_url, error = resolve_pdf_url(url_source)
-                url_pdf_direct = pdf_url if pdf_url else None
+                url_telechargement = f"{base_url}/pdf/{resource_id}" if resource_id else None
             
-            result_item = {
+            resultats.append({
                 'titre': titre,
                 'annee': annee,
                 'serie': pdf['serie'],
                 'matiere': pdf['matiere'],
                 'type': pdf['type_doc'],
+                'id': resource_id,
                 'url_telechargement': url_telechargement
-            }
-            if url_pdf_direct:
-                result_item['url_pdf_direct'] = url_pdf_direct
-            
-            resultats.append(result_item)
+            })
     
     return jsonify({
         'filtres': {
@@ -472,6 +466,50 @@ def recherche():
         'total': len(resultats),
         'resultats': resultats
     })
+
+@app.route('/pdf/<resource_id>')
+def download_pdf(resource_id):
+    if not resource_id or not resource_id.isdigit():
+        return jsonify({'error': 'ID de ressource invalide'}), 400
+    
+    source_url = f"http://mediatheque.accesmad.org/educmad/mod/resource/view.php?id={resource_id}"
+    
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(source_url, timeout=30, allow_redirects=True, headers=headers)
+        response.encoding = 'utf-8'
+        
+        if 'application/pdf' in response.headers.get('Content-Type', ''):
+            return redirect(response.url)
+        
+        pdf_url, error = resolve_pdf_url(source_url)
+        
+        if pdf_url:
+            return redirect(pdf_url)
+        
+        if WKHTMLTOPDF_AVAILABLE:
+            pdf_path, capture_error = capture_page_as_pdf(source_url)
+            
+            if pdf_path and os.path.exists(pdf_path):
+                def generate():
+                    with open(pdf_path, 'rb') as f:
+                        yield f.read()
+                    os.unlink(pdf_path)
+                
+                return Response(
+                    generate(),
+                    mimetype='application/pdf',
+                    headers={'Content-Disposition': f'attachment; filename="bac_{resource_id}.pdf"'}
+                )
+            else:
+                return jsonify({'error': capture_error or 'Échec de la conversion'}), 500
+        
+        return jsonify({'error': error or 'PDF non trouvé', 'id': resource_id}), 404
+        
+    except requests.exceptions.Timeout:
+        return jsonify({'error': 'Timeout lors de la connexion'}), 504
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/capturer')
 def capturer_page():

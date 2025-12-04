@@ -6,29 +6,27 @@ API Flask pour récupérer les PDFs des sujets et corrections du Baccalauréat d
 ## Fonctionnalités
 - Scraping automatique des titres et URLs des PDFs
 - Séparation entre sujets (énoncés) et corrections (corrigés)
-- Résolution des vraies URLs de PDF depuis les pages wrapper
-- Filtrage par matière (Mathématiques, Physique, etc.), série (A, C, D), année et type
-- Conversion des pages HTML en PDF téléchargeables
-- Téléchargement direct des PDFs
+- URLs simples pour téléchargement direct: `/pdf/<id>`
+- Filtrage par matière, série, année et type
+- Conversion automatique des pages HTML en PDF
 
 ## Endpoints API
 
 ### GET /
-Page d'accueil avec la liste des endpoints disponibles et exemples d'utilisation
+Page d'accueil avec la liste des endpoints et exemples
 
 ### GET /recherche
 Recherche avec filtres:
 - `pdf` : filtre par nom/matière (ex: mathematiques, physique)
 - `serie` : filtre par série (A, C, D)
-- `annee` : filtre par année (ex: 2005, 2022)
+- `annee` : filtre par année (ex: 2005, 2023)
 - `type` : filtre par type (`sujet` ou `correction`)
 
 **Exemples:**
 ```
 /recherche?pdf=mathematiques&serie=A&type=correction
 /recherche?pdf=mathematiques&serie=A&type=sujet
-/recherche?pdf=mathematiques&serie=A&type=correction&annee=2005
-/recherche?pdf=physique&serie=C&type=sujet
+/recherche?pdf=mathematiques&serie=A&type=correction&annee=2023
 ```
 
 **Réponse JSON:**
@@ -37,32 +35,28 @@ Recherche avec filtres:
   "filtres": {
     "pdf": "mathematiques",
     "serie": "A",
-    "annee": "2005",
+    "annee": "2023",
     "type": "correction"
   },
   "total": 3,
   "resultats": [
     {
-      "titre": "Corrigé mathématiques exercice 1 série A 2005",
-      "annee": "2005",
+      "titre": "Corrigé Mathématiques Exercices série A 2023",
+      "annee": "2023",
       "serie": "A",
       "matiere": "Mathematiques",
       "type": "correction",
-      "url_telechargement": "https://..."
+      "id": "57064",
+      "url_telechargement": "https://.../pdf/57064"
     }
   ]
 }
 ```
 
-### GET /telecharger
-Télécharge un PDF directement
-- `url` : URL de la ressource à télécharger
-- `titre` : Titre pour le nom du fichier
-
-### GET /capturer
-Convertit une page web en PDF téléchargeable
-- `url` : URL de la page à convertir
-- `titre` : Titre pour le nom du fichier
+### GET /pdf/<id>
+Télécharge un PDF directement via son ID de ressource Moodle.
+- Redirige automatiquement vers le fichier PDF
+- Exemple: `/pdf/57064`
 
 ## Structure des fichiers
 ```
@@ -77,7 +71,6 @@ Convertit une page web en PDF téléchargeable
 - requests 2.31.0
 - beautifulsoup4 4.12.2
 - gunicorn 21.2.0
-- PyPDF2
 - wkhtmltopdf (système) pour la conversion HTML vers PDF
 
 ## Démarrage
@@ -85,13 +78,11 @@ Convertit une page web en PDF téléchargeable
 gunicorn --bind=0.0.0.0:5000 --reuse-port main:app
 ```
 
-Le serveur démarre sur le port 5000.
-
 ## Sources de données
-- Section 1: Énoncés/Sujets (http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=1)
-- Section 2: Corrigés/Corrections (http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=2)
+- Section 1: Énoncés/Sujets
+- Section 2: Corrigés/Corrections
 
 ## Notes techniques
-- Les URLs de téléchargement sont directement utilisables sur téléphone
-- Certaines années anciennes (2000-2011) utilisent des pages HTML converties en PDF
-- L'API détecte automatiquement le type (sujet/correction) basé sur le titre et la section source
+- Les URLs `/pdf/<id>` redirigent directement vers le PDF
+- Compatible téléphone: cliquez sur `url_telechargement` pour télécharger
+- Années anciennes (2000-2011): conversion HTML→PDF automatique
