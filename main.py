@@ -237,23 +237,275 @@ def get_page_content_for_pdf(url):
     except Exception as e:
         return f"Erreur: {str(e)}"
 
+def get_page_html_for_pdf(url):
+    if not is_allowed_url(url):
+        return None, "URL non autorisée"
+    
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, timeout=30, headers=headers, allow_redirects=True)
+        
+        if not is_allowed_url(response.url):
+            return None, "Redirection vers un domaine non autorisé"
+        
+        response.encoding = 'utf-8'
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        for element in soup(['script', 'style', 'nav', 'header', 'footer', 'aside']):
+            element.decompose()
+        
+        for link in soup.find_all('a'):
+            link.unwrap() if link.string else link.decompose()
+        
+        content_div = None
+        selectors = [
+            ('div', {'class_': lambda x: x and 'generalbox' in x.split()}),
+            ('div', {'id': 'region-main'}),
+            ('section', {'id': 'region-main'}),
+            ('div', {'class_': 'content'}),
+        ]
+        
+        for tag, attrs in selectors:
+            content_div = soup.find(tag, **attrs)
+            if content_div:
+                break
+        
+        if not content_div:
+            content_div = soup.find('body')
+        
+        if content_div:
+            html_content = str(content_div)
+            
+            start_markers = [
+                "Baccalauréat de l'enseignement général",
+                "Baccalauréat de l'enseignement",
+                "BACCALAURÉAT",
+                "Baccalauréat"
+            ]
+            
+            for marker in start_markers:
+                start_idx = html_content.find(marker)
+                if start_idx != -1:
+                    tag_start = html_content.rfind('<', 0, start_idx)
+                    if tag_start != -1:
+                        html_content = html_content[tag_start:]
+                    break
+            
+            end_markers = ["Modifié le:", "Dernière modification", "Navigation"]
+            for end_marker in end_markers:
+                end_idx = html_content.find(end_marker)
+                if end_idx != -1:
+                    tag_end = html_content.find('>', end_idx)
+                    if tag_end != -1:
+                        html_content = html_content[:end_idx]
+            
+            return html_content, None
+        
+        return None, "Contenu non trouvé"
+    except Exception as e:
+        return None, str(e)
+
+def format_content_to_html(content, title="Baccalauréat Madagascar"):
+    lines = content.split('\n')
+    formatted_lines = []
+    
+    exercise_pattern = re.compile(r'^(Exercice\s*\d+|EXERCICE\s*\d+)', re.IGNORECASE)
+    problem_pattern = re.compile(r'^(Problème|PROBLÈME)', re.IGNORECASE)
+    question_pattern = re.compile(r'^(\d+[\.\)]\s*|[a-z][\.\)]\s*)', re.IGNORECASE)
+    points_pattern = re.compile(r'\((\d+(?:[,\.]\d+)?)\s*(?:pt|pts|points?)\)', re.IGNORECASE)
+    header_keywords = ['Madagascar', 'Session', 'Série', 'mathematiques', 'MATHEMATIQUES', 'Mathématiques', 
+                       'Physique', 'PHYSIQUE', 'Durée', 'DURÉE', 'Coefficient']
+    
+    in_table = False
+    table_lines = []
+    
+    for i, line in enumerate(lines):
+        line = line.strip()
+        if not line:
+            if in_table and table_lines:
+                formatted_lines.append(build_table_html(table_lines))
+                table_lines = []
+                in_table = False
+            formatted_lines.append('<div class="spacer"></div>')
+            continue
+        
+        if exercise_pattern.match(line) or problem_pattern.match(line):
+            if in_table and table_lines:
+                formatted_lines.append(build_table_html(table_lines))
+                table_lines = []
+                in_table = False
+            points = points_pattern.search(line)
+            points_text = f' ({points.group(1)} points)' if points else ''
+            clean_line = points_pattern.sub('', line).strip()
+            formatted_lines.append(f'<h2 class="exercise">{clean_line}{points_text}</h2>')
+            continue
+        
+        if any(keyword in line for keyword in header_keywords) and i < 15:
+            formatted_lines.append(f'<p class="header-info">{line}</p>')
+            continue
+        
+        if 'corrigé' in line.lower() and len(line) < 20:
+            formatted_lines.append(f'<p class="corrige-link"><em>[{line}]</em></p>')
+            continue
+        
+        if 'N.B.' in line or 'NB:' in line or 'NB :' in line:
+            note_content = line.replace("N.B.", "").replace("NB:", "").replace("NB :", "").strip()
+            formatted_lines.append(f'<div class="note"><strong>N.B. :</strong> {note_content}</div>')
+            continue
+        
+        if looks_like_table_row(line):
+            in_table = True
+            table_lines.append(line)
+            continue
+        elif in_table and table_lines:
+            formatted_lines.append(build_table_html(table_lines))
+            table_lines = []
+            in_table = False
+        
+        points = points_pattern.search(line)
+        if points:
+            points_text = f' <span class="points-inline">({points.group(1)} pts)</span>'
+            clean_line = points_pattern.sub('', line).strip()
+            if question_pattern.match(line):
+                formatted_lines.append(f'<p class="question">{clean_line}{points_text}</p>')
+            else:
+                formatted_lines.append(f'<p>{clean_line}{points_text}</p>')
+            continue
+        
+        if question_pattern.match(line):
+            formatted_lines.append(f'<p class="question">{line}</p>')
+            continue
+        
+        formatted_lines.append(f'<p>{line}</p>')
+    
+    if in_table and table_lines:
+        formatted_lines.append(build_table_html(table_lines))
+    
+    return '\n'.join(formatted_lines)
+
+def looks_like_table_row(line):
+    parts = re.split(r'\s{2,}|\t', line)
+    if len(parts) >= 3:
+        numeric_count = sum(1 for p in parts if re.match(r'^[\d,\.\-]+$', p.strip()))
+        return numeric_count >= 2
+    return False
+
+def build_table_html(lines):
+    if not lines:
+        return ''
+    
+    html = '<table class="data-table">'
+    for i, line in enumerate(lines):
+        parts = re.split(r'\s{2,}|\t', line)
+        parts = [p.strip() for p in parts if p.strip()]
+        
+        if i == 0:
+            html += '<tr class="table-header">'
+            for part in parts:
+                html += f'<th>{part}</th>'
+            html += '</tr>'
+        else:
+            html += '<tr>'
+            for part in parts:
+                html += f'<td>{part}</td>'
+            html += '</tr>'
+    
+    html += '</table>'
+    return html
+
 def create_pdf_from_content(content, title="Baccalauréat Madagascar"):
     if not WKHTMLTOPDF_AVAILABLE:
         return None, "wkhtmltopdf non disponible"
+    
+    formatted_content = format_content_to_html(content, title)
     
     html_template = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <style>
-        body {{ font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }}
-        h1 {{ text-align: center; margin-bottom: 30px; }}
-        pre {{ white-space: pre-wrap; word-wrap: break-word; font-family: Arial, sans-serif; }}
+        @page {{
+            margin: 2cm;
+            size: A4;
+        }}
+        body {{
+            font-family: 'Times New Roman', Times, serif;
+            font-size: 12pt;
+            line-height: 1.6;
+            color: #000;
+            max-width: 100%;
+        }}
+        .title {{
+            text-align: center;
+            font-size: 20pt;
+            font-weight: bold;
+            margin-bottom: 25px;
+            border-bottom: 3px double #333;
+            padding-bottom: 15px;
+        }}
+        .header-info {{
+            text-align: center;
+            font-size: 13pt;
+            margin: 8px 0;
+            font-weight: 500;
+        }}
+        .exercise {{
+            font-size: 14pt;
+            font-weight: bold;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            color: #000;
+            border-left: 5px solid #444;
+            background-color: #f0f0f0;
+            padding: 10px 15px;
+        }}
+        .question {{
+            margin: 12px 0 12px 25px;
+            padding-left: 5px;
+        }}
+        .points-inline {{
+            color: #555;
+            font-style: italic;
+            font-size: 10pt;
+        }}
+        .note {{
+            background-color: #fffde7;
+            border: 1px solid #ffc107;
+            border-left: 5px solid #ffc107;
+            padding: 12px 15px;
+            margin: 20px 0;
+        }}
+        .corrige-link {{
+            color: #888;
+            font-size: 10pt;
+            margin: 5px 0;
+        }}
+        .data-table {{
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+        }}
+        .data-table th, .data-table td {{
+            border: 1px solid #333;
+            padding: 10px;
+            text-align: center;
+        }}
+        .data-table .table-header {{
+            background-color: #e0e0e0;
+            font-weight: bold;
+        }}
+        p {{
+            margin: 10px 0;
+            text-align: justify;
+        }}
+        .spacer {{
+            height: 10px;
+        }}
     </style>
 </head>
 <body>
-    <h1>{title}</h1>
-    <pre>{content}</pre>
+    <div class="title">{title}</div>
+    {formatted_content}
 </body>
 </html>"""
     
@@ -265,7 +517,104 @@ def create_pdf_from_content(content, title="Baccalauréat Madagascar"):
         pdf_path = html_path.replace('.html', '.pdf')
         
         result = subprocess.run(
-            ['wkhtmltopdf', '--quiet', '--encoding', 'utf-8', html_path, pdf_path],
+            ['wkhtmltopdf', '--quiet', '--encoding', 'utf-8', 
+             '--page-size', 'A4',
+             '--margin-top', '20mm',
+             '--margin-bottom', '20mm',
+             '--margin-left', '20mm',
+             '--margin-right', '20mm',
+             html_path, pdf_path],
+            capture_output=True,
+            timeout=60
+        )
+        
+        os.unlink(html_path)
+        
+        if os.path.exists(pdf_path):
+            return pdf_path, None
+        return None, "Échec de la génération du PDF"
+    except Exception as e:
+        return None, str(e)
+
+def create_pdf_from_html(html_content, title="Baccalauréat Madagascar"):
+    if not WKHTMLTOPDF_AVAILABLE:
+        return None, "wkhtmltopdf non disponible"
+    
+    html_template = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @page {{
+            margin: 2cm;
+            size: A4;
+        }}
+        body {{
+            font-family: 'Times New Roman', Times, serif;
+            font-size: 12pt;
+            line-height: 1.6;
+            color: #000;
+            max-width: 100%;
+            padding: 0;
+            margin: 0;
+        }}
+        .pdf-title {{
+            text-align: center;
+            font-size: 18pt;
+            font-weight: bold;
+            margin-bottom: 25px;
+            border-bottom: 2px solid #333;
+            padding-bottom: 15px;
+        }}
+        h1, h2, h3 {{
+            color: #222;
+        }}
+        table {{
+            border-collapse: collapse;
+            width: 100%;
+            margin: 15px 0;
+        }}
+        th, td {{
+            border: 1px solid #333;
+            padding: 8px;
+            text-align: center;
+        }}
+        th {{
+            background-color: #e9e9e9;
+            font-weight: bold;
+        }}
+        p {{
+            margin: 10px 0;
+            text-align: justify;
+        }}
+        .content {{
+            padding: 10px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="pdf-title">{title}</div>
+    <div class="content">
+        {html_content}
+    </div>
+</body>
+</html>"""
+    
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as html_file:
+            html_file.write(html_template)
+            html_path = html_file.name
+        
+        pdf_path = html_path.replace('.html', '.pdf')
+        
+        result = subprocess.run(
+            ['wkhtmltopdf', '--quiet', '--encoding', 'utf-8',
+             '--page-size', 'A4',
+             '--margin-top', '20mm',
+             '--margin-bottom', '20mm',
+             '--margin-left', '20mm',
+             '--margin-right', '20mm',
+             html_path, pdf_path],
             capture_output=True,
             timeout=60
         )
