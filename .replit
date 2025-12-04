@@ -1,7 +1,7 @@
-modules = ["nodejs-18"]
+modules = ["nodejs-18", "python-3.11"]
 [nix]
 channel = "stable-25_05"
-packages = ["glib", "nss", "nspr", "at-spi2-atk", "cups", "libdrm", "libxkbcommon", "xorg.libxcb", "xorg.libX11", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "mesa", "expat", "alsa-lib", "pango", "cairo", "dbus", "chromium"]
+packages = ["alsa-lib", "at-spi2-atk", "cairo", "chromium", "cups", "dbus", "expat", "glib", "libdrm", "libxkbcommon", "mesa", "nspr", "nss", "pango", "xorg.libX11", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "xorg.libxcb"]
 
 [agent]
 expertMode = true
@@ -16,27 +16,23 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "PDF Scraper API"
+args = "API Scraper PDF"
 
 [[workflows.workflow]]
-name = "PDF Scraper API"
+name = "API Scraper PDF"
 author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python main.py"
+waitForPort = 5000
 
 [workflows.workflow.metadata]
 outputType = "webview"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "node index.js"
-waitForPort = 5000
-
 [[ports]]
 localPort = 5000
 externalPort = 80
-
-[[ports]]
-localPort = 40551
-externalPort = 3000
 
 [[ports]]
 localPort = 42303
