@@ -177,6 +177,12 @@ def extract_subject(text):
         return 'Malagasy'
     return None
 
+def clean_title(text):
+    text = re.sub(r'\s*Fichier\s*$', '', text)
+    text = re.sub(r'\s*Page\s*$', '', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
 def scrape_section(url, default_type):
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -193,21 +199,23 @@ def scrape_section(url, default_type):
             text = link.get_text(strip=True)
             
             if '.pdf' in href.lower() or 'resource' in href.lower() or 'mod/resource' in href or 'mod/page' in href or 'page/view' in href:
-                year_match = re.search(r'(19\d{2}|20\d{2})', text)
+                clean_text = clean_title(text)
+                
+                year_match = re.search(r'(19\d{2}|20\d{2})', clean_text)
                 year = year_match.group(1) if year_match else None
                 
-                serie = extract_serie(text)
-                subject = extract_subject(text)
-                doc_type = detect_type_from_title(text) or default_type
+                serie = extract_serie(clean_text)
+                subject = extract_subject(clean_text)
+                doc_type = detect_type_from_title(clean_text) or default_type
                 
-                if text and href:
+                if clean_text and href:
                     full_url = href if href.startswith('http') else f"http://mediatheque.accesmad.org{href}"
                     
                     if is_allowed_url(full_url):
                         is_page = 'mod/page' in href or 'page/view' in href
                         
                         pdfs.append({
-                            'titre': text,
+                            'titre': clean_text,
                             'url': full_url,
                             'annee': year,
                             'serie': serie,
@@ -430,12 +438,13 @@ def recherche():
             annee = pdf['annee']
             url_source = pdf['url']
             titre = pdf['titre']
+            url_encoded = quote(url_source, safe='')
             titre_encoded = quote(titre, safe='')
             
             if annee in PAGE_YEARS or pdf['format'] == 'page':
-                url_telechargement = f"{base_url}/capturer?url={url_source}&titre={titre_encoded}"
+                url_telechargement = f"{base_url}/capturer?url={url_encoded}&titre={titre_encoded}"
             else:
-                url_telechargement = f"{base_url}/telecharger?url={url_source}&titre={titre_encoded}"
+                url_telechargement = f"{base_url}/telecharger?url={url_encoded}&titre={titre_encoded}"
             
             resultats.append({
                 'titre': titre,
