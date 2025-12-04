@@ -123,6 +123,12 @@ COURSES = {
         'name': 'Francais',
         'serie': 'OSE',
         'sections': {'sujet': 1, 'correction': 1}
+    },
+    'svt_a': {
+        'id': 821,
+        'name': 'SVT',
+        'serie': 'A',
+        'sections': {'sujet': 1, 'correction': 2}
     }
 }
 
@@ -190,27 +196,27 @@ def resolve_pdf_url(resource_url):
                     return url, None
         
         object_tag = soup.find('object', {'data': re.compile(r'\.pdf', re.I)})
-        if object_tag:
+        if object_tag and hasattr(object_tag, 'get'):
             data_url = object_tag.get('data')
-            if data_url:
+            if data_url and isinstance(data_url, str):
                 if not data_url.startswith('http'):
                     data_url = f"http://mediatheque.accesmad.org{data_url}"
                 if is_allowed_url(data_url):
                     return data_url, None
         
         embed_tag = soup.find('embed', {'src': re.compile(r'\.pdf', re.I)})
-        if embed_tag:
+        if embed_tag and hasattr(embed_tag, 'get'):
             src_url = embed_tag.get('src')
-            if src_url:
+            if src_url and isinstance(src_url, str):
                 if not src_url.startswith('http'):
                     src_url = f"http://mediatheque.accesmad.org{src_url}"
                 if is_allowed_url(src_url):
                     return src_url, None
         
         iframe_tag = soup.find('iframe', {'src': re.compile(r'pluginfile\.php', re.I)})
-        if iframe_tag:
+        if iframe_tag and hasattr(iframe_tag, 'get'):
             iframe_url = iframe_tag.get('src')
-            if iframe_url:
+            if iframe_url and isinstance(iframe_url, str):
                 if not iframe_url.startswith('http'):
                     iframe_url = f"http://mediatheque.accesmad.org{iframe_url}"
                 if is_allowed_url(iframe_url):
@@ -433,6 +439,22 @@ def scrape_all_pdfs(subject_filter=None, serie_filter=None):
                 pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
                 if isinstance(pdfs, list):
                     all_pdfs.extend(pdfs)
+        elif subject_lower == 'svt':
+            courses_to_scrape = []
+            if serie_filter:
+                serie_upper = serie_filter.upper()
+                if serie_upper == 'A':
+                    courses_to_scrape = ['svt_a']
+                else:
+                    courses_to_scrape = ['svt_a']
+            else:
+                courses_to_scrape = ['svt_a']
+            
+            for course_key in courses_to_scrape:
+                course = COURSES[course_key]
+                pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
+                if isinstance(pdfs, list):
+                    all_pdfs.extend(pdfs)
         elif subject_lower in COURSES:
             course = COURSES[subject_lower]
             pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
@@ -587,13 +609,13 @@ def home():
     base_url = get_api_base_url()
     return jsonify({
         'message': 'API Baccalauréat Madagascar - Téléchargement PDF',
-        'matieres_disponibles': ['mathematiques', 'physique', 'hg', 'malagasy', 'philosophie', 'francais'],
+        'matieres_disponibles': ['mathematiques', 'physique', 'svt', 'hg', 'malagasy', 'philosophie', 'francais'],
         'endpoints': {
             '/recherche': 'Recherche des sujets et corrections de bac',
             '/pdf/<id>': 'Télécharge un PDF directement (redirige vers le fichier)'
         },
         'parametres': {
-            'pdf': 'Filtre par matière (mathematiques, physique, hg, malagasy, philosophie, francais)',
+            'pdf': 'Filtre par matière (mathematiques, physique, svt, hg, malagasy, philosophie, francais)',
             'serie': 'Filtre par série (A, C, D, L, S, OSE)',
             'annee': 'Filtre par année (1999 à 2023)',
             'type': 'Filtre par type (sujet ou correction)'
@@ -644,6 +666,14 @@ def home():
             'Sujet Français série S 2023': f'{base_url}/recherche?pdf=francais&serie=S&type=sujet&annee=2023',
             'Sujets Français série OSE': f'{base_url}/recherche?pdf=francais&serie=OSE&type=sujet',
             'Sujet Français série OSE 2023': f'{base_url}/recherche?pdf=francais&serie=OSE&type=sujet&annee=2023'
+        },
+        'exemples_svt': {
+            'Sujets SVT série A': f'{base_url}/recherche?pdf=svt&serie=A&type=sujet',
+            'Corrections SVT série A': f'{base_url}/recherche?pdf=svt&serie=A&type=correction',
+            'Sujet SVT série A 2019': f'{base_url}/recherche?pdf=svt&serie=A&type=sujet&annee=2019',
+            'Correction SVT série A 2019': f'{base_url}/recherche?pdf=svt&serie=A&type=correction&annee=2019',
+            'Sujet SVT série A 2023': f'{base_url}/recherche?pdf=svt&serie=A&type=sujet&annee=2023',
+            'Correction SVT série A 2023': f'{base_url}/recherche?pdf=svt&serie=A&type=correction&annee=2023'
         },
         'notes': {
             'pdf_direct': 'Les années 2013-2023 sont des fichiers PDF directs',
@@ -757,6 +787,7 @@ def download_pdf(resource_id):
     
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        error = None
         
         response = requests.get(resource_url, timeout=30, allow_redirects=True, headers=headers)
         response.encoding = 'utf-8'
@@ -895,8 +926,8 @@ def telecharger_pdf():
     try:
         pdf_url, error = resolve_pdf_url(url)
         
-        if error:
-            return jsonify({'error': error, 'url_originale': url}), 404
+        if error or not pdf_url:
+            return jsonify({'error': error or 'PDF non trouvé', 'url_originale': url}), 404
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -908,7 +939,7 @@ def telecharger_pdf():
         
         content_type = response.headers.get('Content-Type', '')
         
-        if 'application/pdf' in content_type or pdf_url.lower().endswith('.pdf'):
+        if 'application/pdf' in content_type or str(pdf_url).lower().endswith('.pdf'):
             if titre:
                 filename = f"{clean_filename(titre)}.pdf"
             else:
