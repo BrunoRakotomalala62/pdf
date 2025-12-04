@@ -10,15 +10,28 @@ const BASE_URL_CORRECTIONS = 'http://mediatheque.accesmad.org/educmad/course/vie
 const BASE_URL_MATHS = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=1';
 const BASE_URL_MATHS_CORRECTIONS = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=2';
 
-const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV !== undefined;
+const isReplit = process.env.REPL_ID !== undefined || process.env.REPLIT !== undefined;
 
 let browser = null;
 
 async function getBrowser() {
   if (!browser || !browser.isConnected()) {
-    if (isVercel) {
+    const puppeteerCore = require('puppeteer-core');
+    
+    if (isReplit) {
+      browser = await puppeteerCore.launch({
+        headless: 'new',
+        executablePath: '/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium',
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-software-rasterizer'
+        ]
+      });
+    } else {
       const chromium = require('@sparticuz/chromium-min');
-      const puppeteerCore = require('puppeteer-core');
       
       browser = await puppeteerCore.launch({
         args: [
@@ -36,19 +49,6 @@ async function getBrowser() {
         ),
         headless: chromium.headless,
         ignoreHTTPSErrors: true,
-      });
-    } else {
-      const puppeteer = require('puppeteer');
-      browser = await puppeteer.launch({
-        headless: 'new',
-        executablePath: '/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium',
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-          '--disable-software-rasterizer'
-        ]
       });
     }
   }
