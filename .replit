@@ -1,4 +1,4 @@
-modules = ["nodejs-18", "python-3.11"]
+modules = ["python-3.11"]
 [nix]
 channel = "stable-25_05"
 packages = ["alsa-lib", "at-spi2-atk", "cairo", "chromium", "cups", "dbus", "expat", "glib", "libdrm", "libxkbcommon", "mesa", "nspr", "nss", "pango", "wkhtmltopdf", "xorg.libX11", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "xorg.libxcb"]
@@ -49,6 +49,10 @@ externalPort = 5000
 [[ports]]
 localPort = 35587
 externalPort = 3000
+
+[[ports]]
+localPort = 39315
+externalPort = 6800
 
 [[ports]]
 localPort = 42695
