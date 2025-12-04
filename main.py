@@ -13,6 +13,11 @@ app.config['JSON_AS_ASCII'] = False
 BASE_URL = "http://mediatheque.accesmad.org/educmad/course/view.php?id=817"
 ALLOWED_DOMAINS = ['mediatheque.accesmad.org', 'accesmad.org']
 
+PAGE_YEARS = ['2000', '2002', '2003', '2005', '2006', '2007', '2008', '2009', '2011']
+
+def get_api_base_url():
+    return request.host_url.rstrip('/')
+
 def is_allowed_url(url):
     try:
         parsed = urlparse(url)
@@ -174,589 +179,6 @@ def scrape_pdfs():
     except Exception as e:
         return {'error': str(e)}
 
-def get_page_content_for_pdf(url):
-    if not is_allowed_url(url):
-        return "URL non autorisée"
-    
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        response = requests.get(url, timeout=30, headers=headers, allow_redirects=True)
-        
-        if not is_allowed_url(response.url):
-            return "Redirection vers un domaine non autorisé"
-        
-        response.encoding = 'utf-8'
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        for script in soup(['script', 'style', 'nav', 'header', 'footer']):
-            script.decompose()
-        
-        content_div = None
-        for selector in ['div.box.py-3.generalbox', 'div#region-main-box', 'div.region-content', 'div#region-main', 'div.content', 'section#region-main']:
-            if '.' in selector:
-                parts = selector.split('.')
-                tag = parts[0]
-                classes = parts[1:]
-                content_div = soup.find(tag, class_=lambda x: x and all(c in x.split() for c in classes))
-            elif '#' in selector:
-                parts = selector.split('#')
-                content_div = soup.find(parts[0], id=parts[1])
-            else:
-                content_div = soup.find(selector)
-            if content_div:
-                break
-        
-        if content_div:
-            text = content_div.get_text(separator='\n', strip=True)
-        else:
-            text = soup.get_text(separator='\n', strip=True)
-        
-        start_markers = [
-            "Baccalauréat de l'enseignement général",
-            "Baccalauréat de l'enseignement",
-            "BACCALAURÉAT",
-            "Baccalauréat"
-        ]
-        
-        start_idx = -1
-        for marker in start_markers:
-            start_idx = text.find(marker)
-            if start_idx != -1:
-                break
-        
-        if start_idx != -1:
-            text = text[start_idx:]
-        
-        end_markers = ["Modifié le:", "Dernière modification", "Navigation"]
-        for end_marker in end_markers:
-            end_idx = text.find(end_marker)
-            if end_idx != -1:
-                text = text[:end_idx]
-        
-        return text.strip()
-    except Exception as e:
-        return f"Erreur: {str(e)}"
-
-def get_page_html_for_pdf(url):
-    if not is_allowed_url(url):
-        return None, "URL non autorisée"
-    
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        response = requests.get(url, timeout=30, headers=headers, allow_redirects=True)
-        
-        if not is_allowed_url(response.url):
-            return None, "Redirection vers un domaine non autorisé"
-        
-        response.encoding = 'utf-8'
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        for element in soup(['script', 'style', 'nav', 'header', 'footer', 'aside']):
-            element.decompose()
-        
-        for link in soup.find_all('a'):
-            link.unwrap() if link.string else link.decompose()
-        
-        content_div = None
-        selectors = [
-            ('div', {'class_': lambda x: x and 'generalbox' in x.split()}),
-            ('div', {'id': 'region-main'}),
-            ('section', {'id': 'region-main'}),
-            ('div', {'class_': 'content'}),
-        ]
-        
-        for tag, attrs in selectors:
-            content_div = soup.find(tag, **attrs)
-            if content_div:
-                break
-        
-        if not content_div:
-            content_div = soup.find('body')
-        
-        if content_div:
-            html_content = str(content_div)
-            
-            start_markers = [
-                "Baccalauréat de l'enseignement général",
-                "Baccalauréat de l'enseignement",
-                "BACCALAURÉAT",
-                "Baccalauréat"
-            ]
-            
-            for marker in start_markers:
-                start_idx = html_content.find(marker)
-                if start_idx != -1:
-                    tag_start = html_content.rfind('<', 0, start_idx)
-                    if tag_start != -1:
-                        html_content = html_content[tag_start:]
-                    break
-            
-            end_markers = ["Modifié le:", "Dernière modification", "Navigation"]
-            for end_marker in end_markers:
-                end_idx = html_content.find(end_marker)
-                if end_idx != -1:
-                    tag_end = html_content.find('>', end_idx)
-                    if tag_end != -1:
-                        html_content = html_content[:end_idx]
-            
-            return html_content, None
-        
-        return None, "Contenu non trouvé"
-    except Exception as e:
-        return None, str(e)
-
-def format_content_to_html(content, title="Baccalauréat Madagascar"):
-    lines = content.split('\n')
-    formatted_lines = []
-    
-    exercise_pattern = re.compile(r'^(Exercice\s*\d+|EXERCICE\s*\d+)', re.IGNORECASE)
-    problem_pattern = re.compile(r'^(Problème|PROBLÈME)', re.IGNORECASE)
-    question_pattern = re.compile(r'^(\d+[\.\)]\s*|[a-z][\.\)]\s*)', re.IGNORECASE)
-    points_pattern = re.compile(r'\((\d+(?:[,\.]\d+)?)\s*(?:pt|pts|points?)\)', re.IGNORECASE)
-    header_keywords = ['Madagascar', 'Session', 'Série', 'mathematiques', 'MATHEMATIQUES', 'Mathématiques', 
-                       'Physique', 'PHYSIQUE', 'Durée', 'DURÉE', 'Coefficient']
-    
-    in_table = False
-    table_lines = []
-    
-    for i, line in enumerate(lines):
-        line = line.strip()
-        if not line:
-            if in_table and table_lines:
-                formatted_lines.append(build_table_html(table_lines))
-                table_lines = []
-                in_table = False
-            formatted_lines.append('<div class="spacer"></div>')
-            continue
-        
-        if exercise_pattern.match(line) or problem_pattern.match(line):
-            if in_table and table_lines:
-                formatted_lines.append(build_table_html(table_lines))
-                table_lines = []
-                in_table = False
-            points = points_pattern.search(line)
-            points_text = f' ({points.group(1)} points)' if points else ''
-            clean_line = points_pattern.sub('', line).strip()
-            formatted_lines.append(f'<h2 class="exercise">{clean_line}{points_text}</h2>')
-            continue
-        
-        if any(keyword in line for keyword in header_keywords) and i < 15:
-            formatted_lines.append(f'<p class="header-info">{line}</p>')
-            continue
-        
-        if 'corrigé' in line.lower() and len(line) < 20:
-            formatted_lines.append(f'<p class="corrige-link"><em>[{line}]</em></p>')
-            continue
-        
-        if 'N.B.' in line or 'NB:' in line or 'NB :' in line:
-            note_content = line.replace("N.B.", "").replace("NB:", "").replace("NB :", "").strip()
-            formatted_lines.append(f'<div class="note"><strong>N.B. :</strong> {note_content}</div>')
-            continue
-        
-        if looks_like_table_row(line):
-            in_table = True
-            table_lines.append(line)
-            continue
-        elif in_table and table_lines:
-            formatted_lines.append(build_table_html(table_lines))
-            table_lines = []
-            in_table = False
-        
-        points = points_pattern.search(line)
-        if points:
-            points_text = f' <span class="points-inline">({points.group(1)} pts)</span>'
-            clean_line = points_pattern.sub('', line).strip()
-            if question_pattern.match(line):
-                formatted_lines.append(f'<p class="question">{clean_line}{points_text}</p>')
-            else:
-                formatted_lines.append(f'<p>{clean_line}{points_text}</p>')
-            continue
-        
-        if question_pattern.match(line):
-            formatted_lines.append(f'<p class="question">{line}</p>')
-            continue
-        
-        formatted_lines.append(f'<p>{line}</p>')
-    
-    if in_table and table_lines:
-        formatted_lines.append(build_table_html(table_lines))
-    
-    return '\n'.join(formatted_lines)
-
-def looks_like_table_row(line):
-    parts = re.split(r'\s{2,}|\t', line)
-    if len(parts) >= 3:
-        numeric_count = sum(1 for p in parts if re.match(r'^[\d,\.\-]+$', p.strip()))
-        return numeric_count >= 2
-    return False
-
-def build_table_html(lines):
-    if not lines:
-        return ''
-    
-    html = '<table class="data-table">'
-    for i, line in enumerate(lines):
-        parts = re.split(r'\s{2,}|\t', line)
-        parts = [p.strip() for p in parts if p.strip()]
-        
-        if i == 0:
-            html += '<tr class="table-header">'
-            for part in parts:
-                html += f'<th>{part}</th>'
-            html += '</tr>'
-        else:
-            html += '<tr>'
-            for part in parts:
-                html += f'<td>{part}</td>'
-            html += '</tr>'
-    
-    html += '</table>'
-    return html
-
-def create_pdf_from_content(content, title="Baccalauréat Madagascar"):
-    if not WKHTMLTOPDF_AVAILABLE:
-        return None, "wkhtmltopdf non disponible"
-    
-    formatted_content = format_content_to_html(content, title)
-    
-    html_template = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <style>
-        @page {{
-            margin: 2cm;
-            size: A4;
-        }}
-        body {{
-            font-family: 'Times New Roman', Times, serif;
-            font-size: 12pt;
-            line-height: 1.6;
-            color: #000;
-            max-width: 100%;
-        }}
-        .title {{
-            text-align: center;
-            font-size: 20pt;
-            font-weight: bold;
-            margin-bottom: 25px;
-            border-bottom: 3px double #333;
-            padding-bottom: 15px;
-        }}
-        .header-info {{
-            text-align: center;
-            font-size: 13pt;
-            margin: 8px 0;
-            font-weight: 500;
-        }}
-        .exercise {{
-            font-size: 14pt;
-            font-weight: bold;
-            margin-top: 30px;
-            margin-bottom: 15px;
-            color: #000;
-            border-left: 5px solid #444;
-            background-color: #f0f0f0;
-            padding: 10px 15px;
-        }}
-        .question {{
-            margin: 12px 0 12px 25px;
-            padding-left: 5px;
-        }}
-        .points-inline {{
-            color: #555;
-            font-style: italic;
-            font-size: 10pt;
-        }}
-        .note {{
-            background-color: #fffde7;
-            border: 1px solid #ffc107;
-            border-left: 5px solid #ffc107;
-            padding: 12px 15px;
-            margin: 20px 0;
-        }}
-        .corrige-link {{
-            color: #888;
-            font-size: 10pt;
-            margin: 5px 0;
-        }}
-        .data-table {{
-            border-collapse: collapse;
-            width: 100%;
-            margin: 20px 0;
-        }}
-        .data-table th, .data-table td {{
-            border: 1px solid #333;
-            padding: 10px;
-            text-align: center;
-        }}
-        .data-table .table-header {{
-            background-color: #e0e0e0;
-            font-weight: bold;
-        }}
-        p {{
-            margin: 10px 0;
-            text-align: justify;
-        }}
-        .spacer {{
-            height: 10px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="title">{title}</div>
-    {formatted_content}
-</body>
-</html>"""
-    
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as html_file:
-            html_file.write(html_template)
-            html_path = html_file.name
-        
-        pdf_path = html_path.replace('.html', '.pdf')
-        
-        result = subprocess.run(
-            ['wkhtmltopdf', '--quiet', '--encoding', 'utf-8', 
-             '--page-size', 'A4',
-             '--margin-top', '20mm',
-             '--margin-bottom', '20mm',
-             '--margin-left', '20mm',
-             '--margin-right', '20mm',
-             html_path, pdf_path],
-            capture_output=True,
-            timeout=60
-        )
-        
-        os.unlink(html_path)
-        
-        if os.path.exists(pdf_path):
-            return pdf_path, None
-        return None, "Échec de la génération du PDF"
-    except Exception as e:
-        return None, str(e)
-
-def create_pdf_from_html(html_content, title="Baccalauréat Madagascar"):
-    if not WKHTMLTOPDF_AVAILABLE:
-        return None, "wkhtmltopdf non disponible"
-    
-    html_template = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <style>
-        @page {{
-            margin: 2cm;
-            size: A4;
-        }}
-        body {{
-            font-family: 'Times New Roman', Times, serif;
-            font-size: 12pt;
-            line-height: 1.6;
-            color: #000;
-            max-width: 100%;
-            padding: 0;
-            margin: 0;
-        }}
-        .pdf-title {{
-            text-align: center;
-            font-size: 18pt;
-            font-weight: bold;
-            margin-bottom: 25px;
-            border-bottom: 2px solid #333;
-            padding-bottom: 15px;
-        }}
-        h1, h2, h3 {{
-            color: #222;
-        }}
-        table {{
-            border-collapse: collapse;
-            width: 100%;
-            margin: 15px 0;
-        }}
-        th, td {{
-            border: 1px solid #333;
-            padding: 8px;
-            text-align: center;
-        }}
-        th {{
-            background-color: #e9e9e9;
-            font-weight: bold;
-        }}
-        p {{
-            margin: 10px 0;
-            text-align: justify;
-        }}
-        .content {{
-            padding: 10px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="pdf-title">{title}</div>
-    <div class="content">
-        {html_content}
-    </div>
-</body>
-</html>"""
-    
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as html_file:
-            html_file.write(html_template)
-            html_path = html_file.name
-        
-        pdf_path = html_path.replace('.html', '.pdf')
-        
-        result = subprocess.run(
-            ['wkhtmltopdf', '--quiet', '--encoding', 'utf-8',
-             '--page-size', 'A4',
-             '--margin-top', '20mm',
-             '--margin-bottom', '20mm',
-             '--margin-left', '20mm',
-             '--margin-right', '20mm',
-             html_path, pdf_path],
-            capture_output=True,
-            timeout=60
-        )
-        
-        os.unlink(html_path)
-        
-        if os.path.exists(pdf_path):
-            return pdf_path, None
-        return None, "Échec de la génération du PDF"
-    except Exception as e:
-        return None, str(e)
-
-@app.route('/')
-def home():
-    return jsonify({
-        'message': 'API Scraper PDF Baccalauréat Madagascar',
-        'wkhtmltopdf_disponible': WKHTMLTOPDF_AVAILABLE,
-        'endpoints': {
-            '/pdfs': 'Liste tous les PDFs disponibles',
-            '/recherche': 'Recherche avec filtres (pdf, serie, annee)',
-            '/contenu': 'Récupère le contenu d\'une page (paramètre: url)',
-            '/telecharger': 'Télécharge un PDF (paramètre: url)',
-            '/convertir': 'Convertit une page en PDF formaté (paramètres: url, mode=texte|capture)',
-            '/capturer': 'Capture une page web en PDF image (paramètre: url)'
-        },
-        'modes_conversion': {
-            'texte': 'Extrait le texte et le formate en PDF structuré (défaut)',
-            'capture': 'Capture la page comme une image/screenshot en PDF'
-        }
-    })
-
-@app.route('/pdfs')
-def get_pdfs():
-    pdfs = scrape_pdfs()
-    return jsonify({
-        'total': len(pdfs) if isinstance(pdfs, list) else 0,
-        'source': BASE_URL,
-        'pdfs': pdfs
-    })
-
-@app.route('/recherche')
-def recherche():
-    pdf_filter = request.args.get('pdf', '').lower()
-    serie_filter = request.args.get('serie', '').upper()
-    annee_filter = request.args.get('annee', '')
-    
-    pdfs = scrape_pdfs()
-    
-    if isinstance(pdfs, dict) and 'error' in pdfs:
-        return jsonify(pdfs), 500
-    
-    resultats = []
-    for pdf in pdfs:
-        match = True
-        
-        if pdf_filter:
-            titre_lower = pdf['titre'].lower() if pdf['titre'] else ''
-            matiere_lower = (pdf['matiere'] or '').lower()
-            if pdf_filter not in titre_lower and pdf_filter not in matiere_lower:
-                match = False
-        
-        if serie_filter and pdf['serie'] != serie_filter:
-            match = False
-        
-        if annee_filter and pdf['annee'] != annee_filter:
-            match = False
-        
-        if match:
-            resultats.append(pdf)
-    
-    return jsonify({
-        'filtres': {
-            'pdf': pdf_filter or None,
-            'serie': serie_filter or None,
-            'annee': annee_filter or None
-        },
-        'total': len(resultats),
-        'resultats': resultats
-    })
-
-@app.route('/contenu')
-def get_contenu():
-    url = request.args.get('url', '')
-    if not url:
-        return jsonify({'error': 'Paramètre url requis'}), 400
-    
-    if not is_allowed_url(url):
-        return jsonify({'error': 'URL non autorisée. Seuls les domaines accesmad.org sont acceptés.'}), 403
-    
-    content = get_page_content_for_pdf(url)
-    return jsonify({
-        'url': url,
-        'contenu': content
-    })
-
-@app.route('/telecharger')
-def telecharger_pdf():
-    url = request.args.get('url', '')
-    if not url:
-        return jsonify({'error': 'Paramètre url requis'}), 400
-    
-    if not is_allowed_url(url):
-        return jsonify({'error': 'URL non autorisée. Seuls les domaines accesmad.org sont acceptés.'}), 403
-    
-    try:
-        pdf_url, error = resolve_pdf_url(url)
-        
-        if error:
-            return jsonify({'error': error, 'url_originale': url}), 404
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        response = requests.get(pdf_url, timeout=60, stream=True, headers=headers, allow_redirects=True)
-        
-        if not is_allowed_url(response.url):
-            return jsonify({'error': 'Redirection vers un domaine non autorisé'}), 403
-        
-        content_type = response.headers.get('Content-Type', '')
-        
-        if 'application/pdf' in content_type or pdf_url.lower().endswith('.pdf'):
-            filename = pdf_url.split('/')[-1].split('?')[0]
-            if not filename.endswith('.pdf'):
-                filename = 'document.pdf'
-            
-            return Response(
-                response.content,
-                mimetype='application/pdf',
-                headers={'Content-Disposition': f'attachment; filename="{filename}"'}
-            )
-        else:
-            return jsonify({
-                'error': 'Le fichier trouvé n\'est pas un PDF valide',
-                'url_resolue': pdf_url,
-                'content_type': content_type
-            }), 415
-                
-    except requests.exceptions.Timeout:
-        return jsonify({'error': 'Timeout lors du téléchargement'}), 504
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 def capture_page_as_pdf(url):
     if not WKHTMLTOPDF_AVAILABLE:
         return None, "wkhtmltopdf non disponible"
@@ -887,6 +309,79 @@ def capture_page_as_pdf(url):
     except Exception as e:
         return None, str(e)
 
+@app.route('/')
+def home():
+    base_url = get_api_base_url()
+    return jsonify({
+        'message': 'API Baccalauréat Madagascar - Téléchargement PDF',
+        'endpoints': {
+            '/recherche': 'Recherche et téléchargement des sujets de bac',
+            '/capturer': 'Télécharge une page en PDF (capture)'
+        },
+        'exemples': {
+            'Tous les maths série A': f'{base_url}/recherche?pdf=mathematiques&serie=A',
+            'Maths série A année 2009': f'{base_url}/recherche?pdf=mathematiques&serie=A&annee=2009',
+            'Physique série C': f'{base_url}/recherche?pdf=physique&serie=C'
+        },
+        'note': 'Les URLs retournées sont directement téléchargeables sur votre téléphone'
+    })
+
+@app.route('/recherche')
+def recherche():
+    pdf_filter = request.args.get('pdf', '').lower()
+    serie_filter = request.args.get('serie', '').upper()
+    annee_filter = request.args.get('annee', '')
+    
+    base_url = get_api_base_url()
+    
+    pdfs = scrape_pdfs()
+    
+    if isinstance(pdfs, dict) and 'error' in pdfs:
+        return jsonify(pdfs), 500
+    
+    resultats = []
+    for pdf in pdfs:
+        match = True
+        
+        if pdf_filter:
+            titre_lower = pdf['titre'].lower() if pdf['titre'] else ''
+            matiere_lower = (pdf['matiere'] or '').lower()
+            if pdf_filter not in titre_lower and pdf_filter not in matiere_lower:
+                match = False
+        
+        if serie_filter and pdf['serie'] != serie_filter:
+            match = False
+        
+        if annee_filter and pdf['annee'] != annee_filter:
+            match = False
+        
+        if match:
+            annee = pdf['annee']
+            url_source = pdf['url']
+            
+            if annee in PAGE_YEARS or pdf['type'] == 'page':
+                url_telechargement = f"{base_url}/capturer?url={url_source}"
+            else:
+                url_telechargement = f"{base_url}/telecharger?url={url_source}"
+            
+            resultats.append({
+                'titre': pdf['titre'],
+                'annee': annee,
+                'serie': pdf['serie'],
+                'matiere': pdf['matiere'],
+                'url_telechargement': url_telechargement
+            })
+    
+    return jsonify({
+        'filtres': {
+            'pdf': pdf_filter or None,
+            'serie': serie_filter or None,
+            'annee': annee_filter or None
+        },
+        'total': len(resultats),
+        'resultats': resultats
+    })
+
 @app.route('/capturer')
 def capturer_page():
     url = request.args.get('url', '')
@@ -914,7 +409,7 @@ def capturer_page():
                     yield f.read()
                 os.unlink(pdf_path)
             
-            filename = f"bac_capture_{year}.pdf" if year else "bac_capture.pdf"
+            filename = f"bac_maths_{year}.pdf" if year else "bac_capture.pdf"
             
             return Response(
                 generate(),
@@ -927,50 +422,51 @@ def capturer_page():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/convertir')
-def convertir_page():
+@app.route('/telecharger')
+def telecharger_pdf():
     url = request.args.get('url', '')
-    mode = request.args.get('mode', 'texte')
-    
     if not url:
         return jsonify({'error': 'Paramètre url requis'}), 400
     
     if not is_allowed_url(url):
         return jsonify({'error': 'URL non autorisée. Seuls les domaines accesmad.org sont acceptés.'}), 403
     
-    if not WKHTMLTOPDF_AVAILABLE:
-        return jsonify({'error': 'La conversion PDF n\'est pas disponible sur ce serveur'}), 503
-    
     try:
-        year_match = re.search(r'(19\d{2}|20\d{2})', url)
-        year = year_match.group(1) if year_match else ''
-        
-        if mode == 'capture' or mode == 'image':
-            pdf_path, error = capture_page_as_pdf(url)
-            filename = f"bac_capture_{year}.pdf" if year else "bac_capture.pdf"
-        else:
-            content = get_page_content_for_pdf(url)
-            title = f"Baccalauréat Madagascar {year}"
-            pdf_path, error = create_pdf_from_content(content, title)
-            filename = f"bac_madagascar_{year}.pdf" if year else "bac_madagascar.pdf"
+        pdf_url, error = resolve_pdf_url(url)
         
         if error:
-            return jsonify({'error': error}), 500
+            return jsonify({'error': error, 'url_originale': url}), 404
         
-        if pdf_path and os.path.exists(pdf_path):
-            def generate():
-                with open(pdf_path, 'rb') as f:
-                    yield f.read()
-                os.unlink(pdf_path)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        response = requests.get(pdf_url, timeout=60, stream=True, headers=headers, allow_redirects=True)
+        
+        if not is_allowed_url(response.url):
+            return jsonify({'error': 'Redirection vers un domaine non autorisé'}), 403
+        
+        content_type = response.headers.get('Content-Type', '')
+        
+        if 'application/pdf' in content_type or pdf_url.lower().endswith('.pdf'):
+            year_match = re.search(r'(19\d{2}|20\d{2})', url)
+            year = year_match.group(1) if year_match else ''
+            
+            filename = f"bac_maths_{year}.pdf" if year else "document.pdf"
             
             return Response(
-                generate(),
+                response.content,
                 mimetype='application/pdf',
                 headers={'Content-Disposition': f'attachment; filename="{filename}"'}
             )
         else:
-            return jsonify({'error': 'Impossible de générer le PDF'}), 500
-            
+            return jsonify({
+                'error': 'Le fichier trouvé n\'est pas un PDF valide',
+                'url_resolue': pdf_url,
+                'content_type': content_type
+            }), 415
+                
+    except requests.exceptions.Timeout:
+        return jsonify({'error': 'Timeout lors du téléchargement'}), 504
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
