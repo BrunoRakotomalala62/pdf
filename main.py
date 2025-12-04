@@ -637,7 +637,12 @@ def home():
             '/recherche': 'Recherche avec filtres (pdf, serie, annee)',
             '/contenu': 'Récupère le contenu d\'une page (paramètre: url)',
             '/telecharger': 'Télécharge un PDF (paramètre: url)',
-            '/convertir': 'Convertit une page en PDF (paramètre: url)'
+            '/convertir': 'Convertit une page en PDF formaté (paramètres: url, mode=texte|capture)',
+            '/capturer': 'Capture une page web en PDF image (paramètre: url)'
+        },
+        'modes_conversion': {
+            'texte': 'Extrait le texte et le formate en PDF structuré (défaut)',
+            'capture': 'Capture la page comme une image/screenshot en PDF'
         }
     })
 
@@ -752,8 +757,43 @@ def telecharger_pdf():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/convertir')
-def convertir_page():
+def capture_page_as_pdf(url):
+    if not WKHTMLTOPDF_AVAILABLE:
+        return None, "wkhtmltopdf non disponible"
+    
+    try:
+        pdf_path = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False).name
+        
+        result = subprocess.run(
+            ['wkhtmltopdf', 
+             '--quiet',
+             '--encoding', 'utf-8',
+             '--page-size', 'A4',
+             '--margin-top', '10mm',
+             '--margin-bottom', '10mm',
+             '--margin-left', '10mm',
+             '--margin-right', '10mm',
+             '--javascript-delay', '2000',
+             '--no-stop-slow-scripts',
+             '--enable-local-file-access',
+             '--disable-smart-shrinking',
+             '--zoom', '1.0',
+             '--print-media-type',
+             url, pdf_path],
+            capture_output=True,
+            timeout=120
+        )
+        
+        if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
+            return pdf_path, None
+        return None, "Échec de la capture de la page"
+    except subprocess.TimeoutExpired:
+        return None, "Timeout lors de la capture"
+    except Exception as e:
+        return None, str(e)
+
+@app.route('/capturer')
+def capturer_page():
     url = request.args.get('url', '')
     if not url:
         return jsonify({'error': 'Paramètre url requis'}), 400
@@ -762,16 +802,13 @@ def convertir_page():
         return jsonify({'error': 'URL non autorisée. Seuls les domaines accesmad.org sont acceptés.'}), 403
     
     if not WKHTMLTOPDF_AVAILABLE:
-        return jsonify({'error': 'La conversion PDF n\'est pas disponible sur ce serveur'}), 503
+        return jsonify({'error': 'La capture PDF n\'est pas disponible sur ce serveur'}), 503
     
     try:
-        content = get_page_content_for_pdf(url)
-        
         year_match = re.search(r'(19\d{2}|20\d{2})', url)
         year = year_match.group(1) if year_match else ''
-        title = f"Baccalauréat Madagascar {year}"
         
-        pdf_path, error = create_pdf_from_content(content, title)
+        pdf_path, error = capture_page_as_pdf(url)
         
         if error:
             return jsonify({'error': error}), 500
@@ -782,7 +819,54 @@ def convertir_page():
                     yield f.read()
                 os.unlink(pdf_path)
             
+            filename = f"bac_capture_{year}.pdf" if year else "bac_capture.pdf"
+            
+            return Response(
+                generate(),
+                mimetype='application/pdf',
+                headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+            )
+        else:
+            return jsonify({'error': 'Impossible de capturer la page'}), 500
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/convertir')
+def convertir_page():
+    url = request.args.get('url', '')
+    mode = request.args.get('mode', 'texte')
+    
+    if not url:
+        return jsonify({'error': 'Paramètre url requis'}), 400
+    
+    if not is_allowed_url(url):
+        return jsonify({'error': 'URL non autorisée. Seuls les domaines accesmad.org sont acceptés.'}), 403
+    
+    if not WKHTMLTOPDF_AVAILABLE:
+        return jsonify({'error': 'La conversion PDF n\'est pas disponible sur ce serveur'}), 503
+    
+    try:
+        year_match = re.search(r'(19\d{2}|20\d{2})', url)
+        year = year_match.group(1) if year_match else ''
+        
+        if mode == 'capture' or mode == 'image':
+            pdf_path, error = capture_page_as_pdf(url)
+            filename = f"bac_capture_{year}.pdf" if year else "bac_capture.pdf"
+        else:
+            content = get_page_content_for_pdf(url)
+            title = f"Baccalauréat Madagascar {year}"
+            pdf_path, error = create_pdf_from_content(content, title)
             filename = f"bac_madagascar_{year}.pdf" if year else "bac_madagascar.pdf"
+        
+        if error:
+            return jsonify({'error': error}), 500
+        
+        if pdf_path and os.path.exists(pdf_path):
+            def generate():
+                with open(pdf_path, 'rb') as f:
+                    yield f.read()
+                os.unlink(pdf_path)
             
             return Response(
                 generate(),
