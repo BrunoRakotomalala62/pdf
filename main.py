@@ -150,6 +150,30 @@ COURSES = {
         'name': 'SVT',
         'serie': 'A',
         'sections': {'sujet': 1, 'correction': 2}
+    },
+    'anglais_a': {
+        'id': 135,
+        'name': 'Anglais',
+        'serie': 'A',
+        'sections': {'sujet': 1, 'correction': 1}
+    },
+    'anglais_cd': {
+        'id': 135,
+        'name': 'Anglais',
+        'serie': 'C-D',
+        'sections': {'sujet': 2, 'correction': 2}
+    },
+    'anglais_acd': {
+        'id': 135,
+        'name': 'Anglais',
+        'serie': 'A-C-D',
+        'sections': {'sujet': 3, 'correction': 3}
+    },
+    'anglais_ose': {
+        'id': 135,
+        'name': 'Anglais',
+        'serie': 'OSE',
+        'sections': {'sujet': 4, 'correction': 4}
     }
 }
 
@@ -476,6 +500,28 @@ def scrape_all_pdfs(subject_filter=None, serie_filter=None):
                 pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
                 if isinstance(pdfs, list):
                     all_pdfs.extend(pdfs)
+        elif subject_lower == 'anglais':
+            courses_to_scrape = []
+            if serie_filter:
+                serie_upper = serie_filter.upper()
+                if serie_upper == 'A':
+                    courses_to_scrape = ['anglais_a']
+                elif serie_upper in ['C', 'D', 'C-D', 'CD']:
+                    courses_to_scrape = ['anglais_cd']
+                elif serie_upper in ['A-C-D', 'ACD']:
+                    courses_to_scrape = ['anglais_acd']
+                elif serie_upper == 'OSE':
+                    courses_to_scrape = ['anglais_ose']
+                else:
+                    courses_to_scrape = ['anglais_a', 'anglais_cd', 'anglais_acd', 'anglais_ose']
+            else:
+                courses_to_scrape = ['anglais_a', 'anglais_cd', 'anglais_acd', 'anglais_ose']
+            
+            for course_key in courses_to_scrape:
+                course = COURSES[course_key]
+                pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
+                if isinstance(pdfs, list):
+                    all_pdfs.extend(pdfs)
         elif subject_lower in COURSES:
             course = COURSES[subject_lower]
             pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
@@ -630,7 +676,7 @@ def home():
     base_url = get_api_base_url()
     return jsonify({
         'message': 'API Baccalauréat Madagascar - Téléchargement PDF',
-        'matieres_disponibles': ['mathematiques', 'physique', 'svt', 'hg', 'malagasy', 'philosophie', 'francais'],
+        'matieres_disponibles': ['mathematiques', 'physique', 'svt', 'hg', 'malagasy', 'philosophie', 'francais', 'anglais'],
         'endpoints': {
             '/recherche': 'Recherche des sujets et corrections de bac',
             '/pdf/<id>': 'Télécharge un PDF directement (redirige vers le fichier)'
@@ -696,6 +742,17 @@ def home():
             'Sujet SVT série A 2023': f'{base_url}/recherche?pdf=svt&serie=A&type=sujet&annee=2023',
             'Correction SVT série A 2023': f'{base_url}/recherche?pdf=svt&serie=A&type=correction&annee=2023'
         },
+        'exemples_anglais': {
+            'Sujets Anglais série A': f'{base_url}/recherche?pdf=anglais&serie=A&type=sujet',
+            'Sujet Anglais série A 2016': f'{base_url}/recherche?pdf=anglais&serie=A&type=sujet&annee=2016',
+            'Sujet Anglais série A 2017': f'{base_url}/recherche?pdf=anglais&serie=A&type=sujet&annee=2017',
+            'Sujets Anglais série C-D': f'{base_url}/recherche?pdf=anglais&serie=C&type=sujet',
+            'Sujet Anglais série C-D 2015': f'{base_url}/recherche?pdf=anglais&serie=C&type=sujet&annee=2015',
+            'Sujet Anglais série C-D 2023': f'{base_url}/recherche?pdf=anglais&serie=C&type=sujet&annee=2023',
+            'Sujets Anglais série D': f'{base_url}/recherche?pdf=anglais&serie=D&type=sujet',
+            'Sujets Anglais série A-C-D': f'{base_url}/recherche?pdf=anglais&serie=ACD&type=sujet',
+            'Sujets Anglais série OSE': f'{base_url}/recherche?pdf=anglais&serie=OSE&type=sujet'
+        },
         'notes': {
             'pdf_direct': 'Les années 2013-2023 sont des fichiers PDF directs',
             'page_capture': 'Les années 1999-2011 sont des pages HTML converties en PDF automatiquement',
@@ -703,7 +760,8 @@ def home():
             'serie_acd_francais': 'Pour Français, les séries A, C et D partagent le même contenu',
             'serie_s_ose': 'Pour Malagasy, les séries S et OSE ne contiennent que les années 2022-2023',
             'serie_l': 'Pour Philosophie, la série L ne contient que les années 2022-2023',
-            'francais_series': 'Pour Français: séries A-C-D (1999-2023), L (2022), S (2023), OSE (2023)'
+            'francais_series': 'Pour Français: séries A-C-D (1999-2023), L (2022), S (2023), OSE (2023)',
+            'anglais_series': 'Pour Anglais: séries A (1999-2022), C-D (1999-2023), A-C-D (Remplacement 2000-2002), OSE (2022)'
         },
         'utilisation': 'Faites une recherche, puis cliquez sur url_telechargement pour télécharger le PDF'
     })
@@ -737,11 +795,27 @@ def recherche():
         
         if serie_filter:
             pdf_serie = pdf['serie'] or ''
-            if serie_filter in ['A', 'C', 'D']:
-                if pdf_serie != serie_filter and pdf_serie != 'C-D' and pdf_serie != 'A-C-D':
+            filter_upper = serie_filter.upper().replace('-', '')
+            pdf_serie_norm = pdf_serie.upper().replace('-', '')
+            
+            if filter_upper in ['A', 'C', 'D']:
+                if filter_upper not in pdf_serie_norm:
                     match = False
-            elif pdf_serie != serie_filter:
-                match = False
+            elif filter_upper in ['CD']:
+                if pdf_serie_norm not in ['CD', 'ACD']:
+                    match = False
+            elif filter_upper in ['ACD']:
+                if pdf_serie_norm != 'ACD':
+                    match = False
+            elif filter_upper == 'OSE':
+                if pdf_serie_norm != 'OSE':
+                    match = False
+            elif filter_upper in ['L', 'S']:
+                if pdf_serie_norm != filter_upper:
+                    match = False
+            else:
+                if pdf_serie_norm != filter_upper:
+                    match = False
         
         if annee_filter and pdf['annee'] != annee_filter:
             match = False
