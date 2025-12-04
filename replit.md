@@ -8,6 +8,7 @@ API Flask pour récupérer les PDFs des sujets et corrections du Baccalauréat d
 - **Physique** (série A) - id: 819
 - **Histoire-Géographie** (série A et C-D) - id: 132
 - **Malagasy** (séries A, C-D, S, OSE) - id: 130
+- **Philosophie** (séries A, C-D, L) - id: 131
 
 ## Fonctionnalités
 - Scraping automatique des titres et URLs des PDFs
@@ -24,8 +25,8 @@ Page d'accueil avec la liste des endpoints et exemples
 
 ### GET /recherche
 Recherche avec filtres:
-- `pdf` : filtre par nom/matière (mathematiques, physique, hg, malagasy)
-- `serie` : filtre par série (A, C, D, S, OSE)
+- `pdf` : filtre par nom/matière (mathematiques, physique, hg, malagasy, philosophie)
+- `serie` : filtre par série (A, C, D, L, S, OSE)
 - `annee` : filtre par année (1999 à 2023)
 - `type` : filtre par type (`sujet` ou `correction`)
 
@@ -69,6 +70,19 @@ Note: Les séries C et D partagent le même contenu pour HG.
 ```
 
 Note: Les séries C et D partagent le même contenu pour Malagasy. Les séries S et OSE ne contiennent que les années 2022-2023.
+
+**Exemples Philosophie:**
+```
+/recherche?pdf=philosophie&serie=A&type=sujet
+/recherche?pdf=philosophie&serie=A&type=sujet&annee=2017
+/recherche?pdf=philosophie&serie=C&type=sujet
+/recherche?pdf=philosophie&serie=D&type=sujet
+/recherche?pdf=philosophie&serie=C&type=sujet&annee=2019
+/recherche?pdf=philosophie&serie=L&type=sujet
+/recherche?pdf=philosophie&serie=L&type=sujet&annee=2022
+```
+
+Note: Les séries C et D partagent le même contenu pour Philosophie. La série L ne contient que les années 2022-2023.
 
 **Réponse JSON:**
 ```json
@@ -124,6 +138,11 @@ Télécharge une page HTML convertie en PDF.
 - **Série S**: 2022-2023 (PDF uniquement)
 - **Série OSE**: 2022-2023 (PDF uniquement)
 
+### Philosophie
+- **Série A**: 1999-2022 (2013-2022 en PDF, 1999-2011 en pages)
+- **Séries C-D**: 1999-2023 (2013-2023 en PDF, 1999-2011 en pages)
+- **Série L**: 2022-2023 (PDF uniquement)
+
 ## Structure des fichiers
 ```
 ├── main.py           # Application Flask principale
@@ -152,6 +171,9 @@ gunicorn --bind=0.0.0.0:5000 --reuse-port main:app
 - Malagasy séries C-D: Section 2 = Sujets et Corrections
 - Malagasy série S: Section 3 = Sujets et Corrections
 - Malagasy série OSE: Section 4 = Sujets et Corrections
+- Philosophie série A: Section 1 = Sujets et Corrections (contient aussi L 2023 et CD 2019)
+- Philosophie séries C-D: Section 2 = Sujets et Corrections
+- Philosophie série L: Section 3 = Sujets et Corrections (+ L 2023 dans section 1)
 
 ## Notes techniques
 - Les URLs `/pdf/<id>` redirigent directement vers le PDF
@@ -170,6 +192,9 @@ COURSES = {
     'malagasy_a': {'id': 130, 'name': 'Malagasy', 'serie': 'A', 'sections': {'sujet': 1, 'correction': 1}},
     'malagasy_cd': {'id': 130, 'name': 'Malagasy', 'serie': 'C-D', 'sections': {'sujet': 2, 'correction': 2}},
     'malagasy_s': {'id': 130, 'name': 'Malagasy', 'serie': 'S', 'sections': {'sujet': 3, 'correction': 3}},
-    'malagasy_ose': {'id': 130, 'name': 'Malagasy', 'serie': 'OSE', 'sections': {'sujet': 4, 'correction': 4}}
+    'malagasy_ose': {'id': 130, 'name': 'Malagasy', 'serie': 'OSE', 'sections': {'sujet': 4, 'correction': 4}},
+    'philosophie_a': {'id': 131, 'name': 'Philosophie', 'serie': 'A', 'sections': {'sujet': 1, 'correction': 1}},
+    'philosophie_cd': {'id': 131, 'name': 'Philosophie', 'serie': 'C-D', 'sections': {'sujet': 2, 'correction': 2}},
+    'philosophie_l': {'id': 131, 'name': 'Philosophie', 'serie': 'L', 'sections': {'sujet': 3, 'correction': 3}}
 }
 ```

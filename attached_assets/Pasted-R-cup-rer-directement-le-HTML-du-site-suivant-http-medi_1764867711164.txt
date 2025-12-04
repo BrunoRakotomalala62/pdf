@@ -1,0 +1,95 @@
+Récupérer directement le HTML du site suivant :
+
+http://mediatheque.accesmad.org/educmad/course/view.php?id=131
+
+
+Connaître sa structure HTML ici
+
+
+Récupérer alors le sujet pdf 1999 jusqu'à 2023
+
+Afficher le titre et les url_pdf téléchargement direct comme le sujet mathématiques A
+
+Le sujet 2013 à 2023 est un pdf 
+
+Mais 1999 jusqu'à 2011 est un page URL mettre une capture image et mettre dans un pdf 
+
+Comme le sujet mathématiques 2000 ect....
+
+Ajouter GET/recherche?pdf=philosophie&serie=A&type=sujet
+
+GET/recherche?pdf=philosophie&serie=A&type=sujet&annee=2019
+
+Mais il y a une section sujet C/D 2019 dans le section série A mettre cette pdf dans le section C/D
+
+Mettre aussi même récupérer Malagasy C-D:
+Récupérer alors le sujet pdf 1999 jusqu'à 2023
+
+Afficher le titre et les url_pdf téléchargement direct comme le sujet mathématiques A
+
+Le sujet 2013 à 2023 est un pdf 
+
+Mais 1999 jusqu'à 2011 est un page URL mettre une capture image et mettre dans un pdf 
+
+Comme le sujet mathématiques 2000 ect....
+
+Ajouter GET/recherche?pdf=philosophie&serie=C&type=sujet
+
+
+Serie C ou D valable 
+
+GET/recherche?pdf=philosophie&serie=C&type=sujet&annee=2019
+
+Serie C ou D valable
+
+
+
+
+
+Ajouter GET/recherche?pdf=philosophie&serie=L&type=sujet
+
+
+
+GET/recherche?pdf=philosophie&serie=L&type=sujet&annee=2022
+
+
+
+
+
+
+
+
+
+Mettre aussi même récupérer Malagasy S:
+Récupérer alors le sujet pdf 2022 jusqu'à 2023
+
+Afficher le titre et les url_pdf téléchargement direct comme le sujet mathématiques A
+
+Le sujet 2022 à 2023 est un pdf 
+
+
+Ajouter GET/recherche?pdf=Malagasy&serie=S&type=sujet
+
+
+GET/recherche?pdf=Malagasy&serie=S&type=sujet&annee=2022
+
+
+
+Mettre aussi même récupérer Malagasy OSE:
+Récupérer alors le sujet pdf 2022 jusqu'à 2023
+
+Afficher le titre et les url_pdf téléchargement direct comme le sujet mathématiques A
+
+Le sujet 2022 à 2023 est un pdf 
+
+
+Ajouter GET/recherche?pdf=Malagasy&serie=OSE&type=sujet
+
+
+GET/recherche?pdf=Malagasy&serie=OSE&type=sujet&annee=2022
+
+
+Mais il y a une section sujet L 2023 dans le section série A mettre cette pdf dans le section L
+
+
+

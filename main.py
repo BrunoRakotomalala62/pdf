@@ -81,6 +81,24 @@ COURSES = {
         'name': 'Malagasy',
         'serie': 'OSE',
         'sections': {'sujet': 4, 'correction': 4}
+    },
+    'philosophie_a': {
+        'id': 131,
+        'name': 'Philosophie',
+        'serie': 'A',
+        'sections': {'sujet': 1, 'correction': 1}
+    },
+    'philosophie_cd': {
+        'id': 131,
+        'name': 'Philosophie',
+        'serie': 'C-D',
+        'sections': {'sujet': 2, 'correction': 2}
+    },
+    'philosophie_l': {
+        'id': 131,
+        'name': 'Philosophie',
+        'serie': 'L',
+        'sections': {'sujet': 3, 'correction': 3}
     }
 }
 
@@ -357,6 +375,14 @@ def scrape_all_pdfs(subject_filter=None, serie_filter=None):
                 pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
                 if isinstance(pdfs, list):
                     all_pdfs.extend(pdfs)
+        elif subject_lower == 'philosophie' or subject_lower == 'philo':
+            courses_to_scrape = ['philosophie_a', 'philosophie_cd', 'philosophie_l']
+            
+            for course_key in courses_to_scrape:
+                course = COURSES[course_key]
+                pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
+                if isinstance(pdfs, list):
+                    all_pdfs.extend(pdfs)
         elif subject_lower in COURSES:
             course = COURSES[subject_lower]
             pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
@@ -511,14 +537,14 @@ def home():
     base_url = get_api_base_url()
     return jsonify({
         'message': 'API Baccalauréat Madagascar - Téléchargement PDF',
-        'matieres_disponibles': ['mathematiques', 'physique', 'hg', 'malagasy'],
+        'matieres_disponibles': ['mathematiques', 'physique', 'hg', 'malagasy', 'philosophie'],
         'endpoints': {
             '/recherche': 'Recherche des sujets et corrections de bac',
             '/pdf/<id>': 'Télécharge un PDF directement (redirige vers le fichier)'
         },
         'parametres': {
-            'pdf': 'Filtre par matière (mathematiques, physique, hg, malagasy)',
-            'serie': 'Filtre par série (A, C, D, S, OSE)',
+            'pdf': 'Filtre par matière (mathematiques, physique, hg, malagasy, philosophie)',
+            'serie': 'Filtre par série (A, C, D, L, S, OSE)',
             'annee': 'Filtre par année (1999 à 2023)',
             'type': 'Filtre par type (sujet ou correction)'
         },
@@ -549,11 +575,20 @@ def home():
             'Sujets Malagasy série OSE': f'{base_url}/recherche?pdf=malagasy&serie=OSE&type=sujet',
             'Sujet Malagasy série OSE 2022': f'{base_url}/recherche?pdf=malagasy&serie=OSE&type=sujet&annee=2022'
         },
+        'exemples_philosophie': {
+            'Sujets Philosophie série A': f'{base_url}/recherche?pdf=philosophie&serie=A&type=sujet',
+            'Sujet Philosophie série A 2019': f'{base_url}/recherche?pdf=philosophie&serie=A&type=sujet&annee=2019',
+            'Sujets Philosophie série C (ou D)': f'{base_url}/recherche?pdf=philosophie&serie=C&type=sujet',
+            'Sujet Philosophie série C 2019': f'{base_url}/recherche?pdf=philosophie&serie=C&type=sujet&annee=2019',
+            'Sujets Philosophie série L': f'{base_url}/recherche?pdf=philosophie&serie=L&type=sujet',
+            'Sujet Philosophie série L 2022': f'{base_url}/recherche?pdf=philosophie&serie=L&type=sujet&annee=2022'
+        },
         'notes': {
             'pdf_direct': 'Les années 2013-2023 sont des fichiers PDF directs',
             'page_capture': 'Les années 1999-2011 sont des pages HTML converties en PDF automatiquement',
-            'serie_cd': 'Pour HG et Malagasy, les séries C et D partagent le même contenu',
-            'serie_s_ose': 'Pour Malagasy, les séries S et OSE ne contiennent que les années 2022-2023'
+            'serie_cd': 'Pour HG, Malagasy et Philosophie, les séries C et D partagent le même contenu',
+            'serie_s_ose': 'Pour Malagasy, les séries S et OSE ne contiennent que les années 2022-2023',
+            'serie_l': 'Pour Philosophie, la série L ne contient que les années 2022-2023'
         },
         'utilisation': 'Faites une recherche, puis cliquez sur url_telechargement pour télécharger le PDF'
     })
