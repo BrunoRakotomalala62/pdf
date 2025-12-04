@@ -15,83 +15,148 @@ const BASE_URL_MATHS_CORRECTIONS = 'http://mediatheque.accesmad.org/educmad/cour
 
 const isReplit = process.env.REPL_ID !== undefined || process.env.REPLIT !== undefined;
 
-async function createBrowser() {
+let cachedExecutablePath = null;
+let browserInitPromise = null;
+let browserQueue = Promise.resolve();
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 2000;
+
+async function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function initChromium() {
+  if (cachedExecutablePath) {
+    return cachedExecutablePath;
+  }
+  
+  if (browserInitPromise) {
+    return browserInitPromise;
+  }
+  
+  browserInitPromise = (async () => {
+    if (isReplit) {
+      cachedExecutablePath = '/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium';
+    } else {
+      const chromium = require('@sparticuz/chromium-min');
+      chromium.setGraphicsMode = false;
+      
+      console.log('Initialisation de Chromium...');
+      cachedExecutablePath = await chromium.executablePath(
+        'https://github.com/Sparticuz/chromium/releases/download/v123.0.1/chromium-v123.0.1-pack.tar'
+      );
+      console.log('Chromium initialisé avec succès:', cachedExecutablePath);
+    }
+    return cachedExecutablePath;
+  })();
+  
+  return browserInitPromise;
+}
+
+async function createBrowserWithRetry(retryCount = 0) {
   const puppeteerCore = require('puppeteer-core');
   
-  if (isReplit) {
-    return await puppeteerCore.launch({
-      headless: 'new',
-      executablePath: '/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-software-rasterizer'
-      ]
-    });
-  } else {
-    const chromium = require('@sparticuz/chromium-min');
-    chromium.setGraphicsMode = false;
+  try {
+    const executablePath = await initChromium();
     
-    return await puppeteerCore.launch({
-      args: [
-        ...chromium.args,
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--single-process',
-        '--hide-scrollbars',
-        '--disable-web-security'
-      ],
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(
-        'https://github.com/Sparticuz/chromium/releases/download/v123.0.1/chromium-v123.0.1-pack.tar'
-      ),
-      headless: chromium.headless,
-      ignoreHTTPSErrors: true,
-    });
+    if (isReplit) {
+      return await puppeteerCore.launch({
+        headless: 'new',
+        executablePath,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-software-rasterizer'
+        ]
+      });
+    } else {
+      const chromium = require('@sparticuz/chromium-min');
+      
+      return await puppeteerCore.launch({
+        args: [
+          ...chromium.args,
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--single-process',
+          '--hide-scrollbars',
+          '--disable-web-security'
+        ],
+        defaultViewport: chromium.defaultViewport,
+        executablePath,
+        headless: chromium.headless,
+        ignoreHTTPSErrors: true,
+      });
+    }
+  } catch (error) {
+    if (error.message && error.message.includes('ETXTBSY') && retryCount < MAX_RETRIES) {
+      console.log(`ETXTBSY erreur, tentative ${retryCount + 1}/${MAX_RETRIES}...`);
+      await sleep(RETRY_DELAY * (retryCount + 1));
+      return createBrowserWithRetry(retryCount + 1);
+    }
+    throw error;
   }
 }
 
-async function convertPageToPdf(pageUrl) {
-  let browser = null;
-  let page = null;
-  
-  try {
-    browser = await createBrowser();
-    page = await browser.newPage();
-    
-    await page.goto(pageUrl, { 
-      waitUntil: 'networkidle2',
-      timeout: 30000
-    });
-    
-    await page.evaluate(() => {
-      const header = document.querySelector('#header, .navbar, nav');
-      const footer = document.querySelector('#footer, footer');
-      const sidebar = document.querySelector('.drawer, #nav-drawer');
-      if (header) header.style.display = 'none';
-      if (footer) footer.style.display = 'none';
-      if (sidebar) sidebar.style.display = 'none';
-    });
-    
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: {
-        top: '20mm',
-        right: '15mm',
-        bottom: '20mm',
-        left: '15mm'
+async function withBrowserQueue(fn) {
+  return new Promise((resolve, reject) => {
+    browserQueue = browserQueue.then(async () => {
+      try {
+        const result = await fn();
+        resolve(result);
+      } catch (error) {
+        reject(error);
       }
-    });
+    }).catch(reject);
+  });
+}
+
+async function convertPageToPdf(pageUrl) {
+  return withBrowserQueue(async () => {
+    let browser = null;
+    let page = null;
     
-    return pdfBuffer;
-  } finally {
-    if (page) await page.close();
-    if (browser) await browser.close();
-  }
+    try {
+      browser = await createBrowserWithRetry();
+      page = await browser.newPage();
+      
+      await page.goto(pageUrl, { 
+        waitUntil: 'networkidle2',
+        timeout: 30000
+      });
+      
+      await page.evaluate(() => {
+        const header = document.querySelector('#header, .navbar, nav');
+        const footer = document.querySelector('#footer, footer');
+        const sidebar = document.querySelector('.drawer, #nav-drawer');
+        if (header) header.style.display = 'none';
+        if (footer) footer.style.display = 'none';
+        if (sidebar) sidebar.style.display = 'none';
+      });
+      
+      const pdfBuffer = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: {
+          top: '20mm',
+          right: '15mm',
+          bottom: '20mm',
+          left: '15mm'
+        }
+      });
+      
+      return pdfBuffer;
+    } finally {
+      if (page) {
+        try { await page.close(); } catch (e) { }
+      }
+      if (browser) {
+        try { await browser.close(); } catch (e) { }
+      }
+    }
+  });
 }
 
 async function getDirectPdfUrl(viewUrl) {
@@ -592,7 +657,8 @@ app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    chromiumReady: cachedExecutablePath !== null
   });
 });
 
@@ -611,9 +677,21 @@ function startKeepAlive() {
   }
 }
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Serveur démarré sur le port ${PORT}`);
-  startKeepAlive();
-});
+async function startServer() {
+  try {
+    console.log('Pré-initialisation de Chromium...');
+    await initChromium();
+    console.log('Chromium prêt!');
+  } catch (error) {
+    console.error('Erreur lors de l\'initialisation de Chromium:', error.message);
+  }
+  
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Serveur démarré sur le port ${PORT}`);
+    startKeepAlive();
+  });
+}
+
+startServer();
 
 module.exports = app;
