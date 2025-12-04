@@ -5,9 +5,32 @@ import re
 import subprocess
 import tempfile
 import os
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote, unquote
+import unicodedata
 
 app = Flask(__name__)
+
+def clean_filename(titre):
+    if not titre:
+        return "document"
+    
+    titre = unquote(titre)
+    
+    titre = titre.replace('Fichier', '').replace('Page', '').strip()
+    
+    titre = unicodedata.normalize('NFD', titre)
+    titre = ''.join(c for c in titre if unicodedata.category(c) != 'Mn')
+    
+    titre = re.sub(r'[^\w\s\-]', '', titre)
+    titre = re.sub(r'\s+', '_', titre.strip())
+    titre = re.sub(r'_+', '_', titre)
+    titre = titre.strip('_')
+    
+    if len(titre) > 80:
+        titre = titre[:80]
+    
+    return titre if titre else "document"
+
 app.config['JSON_AS_ASCII'] = False
 
 BASE_URL = "http://mediatheque.accesmad.org/educmad/course/view.php?id=817"
@@ -358,14 +381,16 @@ def recherche():
         if match:
             annee = pdf['annee']
             url_source = pdf['url']
+            titre = pdf['titre']
+            titre_encoded = quote(titre, safe='')
             
             if annee in PAGE_YEARS or pdf['type'] == 'page':
-                url_telechargement = f"{base_url}/capturer?url={url_source}"
+                url_telechargement = f"{base_url}/capturer?url={url_source}&titre={titre_encoded}"
             else:
-                url_telechargement = f"{base_url}/telecharger?url={url_source}"
+                url_telechargement = f"{base_url}/telecharger?url={url_source}&titre={titre_encoded}"
             
             resultats.append({
-                'titre': pdf['titre'],
+                'titre': titre,
                 'annee': annee,
                 'serie': pdf['serie'],
                 'matiere': pdf['matiere'],
@@ -385,6 +410,8 @@ def recherche():
 @app.route('/capturer')
 def capturer_page():
     url = request.args.get('url', '')
+    titre = request.args.get('titre', '')
+    
     if not url:
         return jsonify({'error': 'Paramètre url requis'}), 400
     
@@ -395,9 +422,6 @@ def capturer_page():
         return jsonify({'error': 'La capture PDF n\'est pas disponible sur ce serveur'}), 503
     
     try:
-        year_match = re.search(r'(19\d{2}|20\d{2})', url)
-        year = year_match.group(1) if year_match else ''
-        
         pdf_path, error = capture_page_as_pdf(url)
         
         if error:
@@ -409,7 +433,12 @@ def capturer_page():
                     yield f.read()
                 os.unlink(pdf_path)
             
-            filename = f"bac_maths_{year}.pdf" if year else "bac_capture.pdf"
+            if titre:
+                filename = f"{clean_filename(titre)}.pdf"
+            else:
+                year_match = re.search(r'(19\d{2}|20\d{2})', url)
+                year = year_match.group(1) if year_match else ''
+                filename = f"bac_{year}.pdf" if year else "bac_capture.pdf"
             
             return Response(
                 generate(),
@@ -425,6 +454,8 @@ def capturer_page():
 @app.route('/telecharger')
 def telecharger_pdf():
     url = request.args.get('url', '')
+    titre = request.args.get('titre', '')
+    
     if not url:
         return jsonify({'error': 'Paramètre url requis'}), 400
     
@@ -448,10 +479,12 @@ def telecharger_pdf():
         content_type = response.headers.get('Content-Type', '')
         
         if 'application/pdf' in content_type or pdf_url.lower().endswith('.pdf'):
-            year_match = re.search(r'(19\d{2}|20\d{2})', url)
-            year = year_match.group(1) if year_match else ''
-            
-            filename = f"bac_maths_{year}.pdf" if year else "document.pdf"
+            if titre:
+                filename = f"{clean_filename(titre)}.pdf"
+            else:
+                year_match = re.search(r'(19\d{2}|20\d{2})', url)
+                year = year_match.group(1) if year_match else ''
+                filename = f"bac_{year}.pdf" if year else "document.pdf"
             
             return Response(
                 response.content,
