@@ -1,794 +1,164 @@
 const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const crypto = require('crypto');
+const chromium = require('@sparticuz/chromium');
+const puppeteer = require('puppeteer-core');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-const RENDER_EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL;
-const PING_INTERVAL = 14 * 60 * 1000;
+// URLs sources
+const SOURCES = {
+  sujetsPC: 'http://mediatheque.accesmad.org/educmad/course/view.php?id=819',
+  correctionsPC: 'http://mediatheque.accesmad.org/educmad/course/view.php?id=819&section=2',
+  sujetsMath: 'http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=1',
+  correctionsMath: 'http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=2'
+};
 
-const BASE_URL = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=819';
-const BASE_URL_CORRECTIONS = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=819&section=2';
-const BASE_URL_MATHS = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=1';
-const BASE_URL_MATHS_CORRECTIONS = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=2';
-
-const isReplit = process.env.REPL_ID !== undefined || process.env.REPLIT !== undefined;
-const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV !== undefined;
-
-const pdfCache = new Map();
-const PDF_CACHE_DURATION = 10 * 60 * 1000;
-
-let persistentBrowser = null;
-let browserLock = false;
-let lastBrowserActivity = Date.now();
-const BROWSER_IDLE_TIMEOUT = 5 * 60 * 1000;
-
-function generatePdfId() {
-  return crypto.randomBytes(8).toString('hex');
-}
-
-function cleanExpiredPdfs() {
-  const now = Date.now();
-  for (const [id, data] of pdfCache.entries()) {
-    if (now - data.createdAt > PDF_CACHE_DURATION) {
-      pdfCache.delete(id);
-    }
-  }
-}
-
-setInterval(cleanExpiredPdfs, 60000);
-
-async function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function waitForBrowserLock(maxWait = 60000) {
-  const startTime = Date.now();
-  while (browserLock) {
-    if (Date.now() - startTime > maxWait) {
-      throw new Error('Timeout en attente du navigateur');
-    }
-    await sleep(100);
-  }
-  browserLock = true;
-}
-
-function releaseBrowserLock() {
-  browserLock = false;
-  lastBrowserActivity = Date.now();
-}
-
-async function createBrowser() {
-  const puppeteerCore = require('puppeteer-core');
-  
-  console.log('Création du navigateur...');
-  console.log('Environnement: Replit=' + isReplit + ', Vercel=' + isVercel);
-  
-  if (isReplit) {
-    return await puppeteerCore.launch({
-      headless: 'new',
-      executablePath: '/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-software-rasterizer',
-        '--disable-extensions',
-        '--disable-background-networking',
-        '--no-first-run'
-      ]
-    });
-  } else {
-    const chromium = require('@sparticuz/chromium');
-    
-    chromium.setGraphicsMode = false;
-    
-    const executablePath = await chromium.executablePath();
-    console.log('Chromium path:', executablePath);
-    
-    return await puppeteerCore.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: executablePath,
-      headless: chromium.headless,
-      ignoreHTTPSErrors: true,
-    });
-  }
-}
-
-async function getPersistentBrowser() {
-  if (isVercel) {
-    return await createBrowser();
-  }
-  
-  if (persistentBrowser && persistentBrowser.isConnected()) {
-    return persistentBrowser;
-  }
-  
-  persistentBrowser = await createBrowser();
-  
-  persistentBrowser.on('disconnected', () => {
-    console.log('Navigateur déconnecté');
-    persistentBrowser = null;
-  });
-  
-  console.log('Navigateur persistant créé avec succès');
-  return persistentBrowser;
-}
-
-async function closeBrowserIfIdle() {
-  if (persistentBrowser && !browserLock) {
-    const idleTime = Date.now() - lastBrowserActivity;
-    if (idleTime > BROWSER_IDLE_TIMEOUT) {
-      console.log('Fermeture du navigateur inactif...');
-      try {
-        await persistentBrowser.close();
-      } catch (e) { }
-      persistentBrowser = null;
-    }
-  }
-}
-
-if (!isVercel) {
-  setInterval(closeBrowserIfIdle, 60000);
-}
-
-async function convertPageToPdfBuffer(pageUrl) {
-  await waitForBrowserLock();
-  
-  let browser = null;
-  let page = null;
-  const shouldCloseBrowser = isVercel;
-  
+// Fonction pour scraper une section
+async function scraperSection(url) {
   try {
-    browser = await getPersistentBrowser();
-    page = await browser.newPage();
-    
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      const resourceType = req.resourceType();
-      if (['stylesheet', 'font', 'media'].includes(resourceType)) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-    
-    await page.goto(pageUrl, { 
-      waitUntil: 'domcontentloaded',
-      timeout: 25000
-    });
-    
-    const extractionResult = await page.evaluate(() => {
-      let examTitle = document.title || '';
-      
-      const mainContentBox = document.querySelector('div[role="main"] .generalbox, div[role="main"] .box, #region-main .generalbox');
-      
-      if (mainContentBox) {
-        const contentDiv = mainContentBox.querySelector('.no-overflow') || mainContentBox;
-        const mainContent = contentDiv.innerHTML;
-        
-        const titleMatch = examTitle.match(/(Enonc[eé]|Corrig[eé]).*?(\d{4})/i);
-        const displayTitle = titleMatch ? titleMatch[0] : examTitle.split('|')[0].trim();
-        
-        document.body.innerHTML = `
-          <div style="font-family: 'Times New Roman', serif; max-width: 100%; padding: 10px; line-height: 1.5; font-size: 12pt;">
-            <h1 style="text-align: center; font-size: 16pt; margin-bottom: 20px;">${displayTitle}</h1>
-            ${mainContent}
-          </div>
-        `;
-        
-        document.querySelectorAll('a').forEach(link => {
-          if (link.textContent.toLowerCase().includes('corrig')) {
-            link.style.color = '#CC0000';
-          } else {
-            link.style.color = '#000';
-            link.style.textDecoration = 'none';
-          }
-        });
-        
-        document.querySelectorAll('img').forEach(img => {
-          img.style.maxWidth = '100%';
-          img.style.height = 'auto';
-        });
-        
-        return { success: true, title: displayTitle, method: 'generalbox' };
-      }
-      
-      const mainRole = document.querySelector('div[role="main"]');
-      if (mainRole) {
-        const selectorsToRemove = [
-          '.activity-header', '.activity-information', 
-          '.course-content-header', '.completion-info',
-          'nav', '.breadcrumb', '.navbar'
-        ];
-        
-        selectorsToRemove.forEach(selector => {
-          mainRole.querySelectorAll(selector).forEach(el => el.remove());
-        });
-        
-        const mainContent = mainRole.innerHTML;
-        
-        document.body.innerHTML = `
-          <div style="font-family: 'Times New Roman', serif; max-width: 100%; padding: 10px; line-height: 1.5; font-size: 12pt;">
-            ${mainContent}
-          </div>
-        `;
-        
-        return { success: true, title: examTitle.split('|')[0].trim(), method: 'role-main' };
-      }
-      
-      const regionMain = document.querySelector('#region-main');
-      if (regionMain) {
-        const selectorsToRemove = [
-          '.activity-header', '.activity-information',
-          '.course-content-header', 'nav', '.breadcrumb'
-        ];
-        
-        selectorsToRemove.forEach(selector => {
-          regionMain.querySelectorAll(selector).forEach(el => el.remove());
-        });
-        
-        document.body.innerHTML = `
-          <div style="font-family: 'Times New Roman', serif; max-width: 100%; padding: 10px; line-height: 1.5;">
-            ${regionMain.innerHTML}
-          </div>
-        `;
-        
-        return { success: true, title: examTitle.split('|')[0].trim(), method: 'region-main' };
-      }
-      
-      return { success: false, title: 'Contenu non trouvé', method: 'fallback' };
-    });
-    
-    console.log('Extraction:', extractionResult);
-    
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: {
-        top: '15mm',
-        right: '15mm',
-        bottom: '15mm',
-        left: '15mm'
-      }
-    });
-    
-    return {
-      buffer: pdfBuffer,
-      title: extractionResult.title,
-      success: extractionResult.success,
-      method: extractionResult.method
-    };
-  } finally {
-    if (page) {
-      try { await page.close(); } catch (e) { }
-    }
-    if (shouldCloseBrowser && browser) {
-      try { await browser.close(); } catch (e) { }
-    }
-    releaseBrowserLock();
-  }
-}
-
-async function getDirectPdfUrl(viewUrl) {
-  try {
-    const redirectUrl = viewUrl.includes('?') ? viewUrl + '&redirect=1' : viewUrl + '?redirect=1';
-    const response = await axios.head(redirectUrl, {
-      maxRedirects: 0,
-      validateStatus: status => status >= 200 && status < 400,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
-    
-    if (response.headers.location) {
-      return response.headers.location;
-    }
-    return null;
-  } catch (error) {
-    if (error.response && error.response.headers && error.response.headers.location) {
-      return error.response.headers.location;
-    }
-    return null;
-  }
-}
-
-async function scrapePDFs(searchTerm = '', getDirectLinks = false) {
-  try {
-    const response = await axios.get(BASE_URL, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      }
-    });
-    
+    const response = await axios.get(url);
     const $ = cheerio.load(response.data);
-    const pdfs = [];
-    
-    $('li.activity.modtype_resource, li.activity.modtype_page').each((index, element) => {
-      const titleElement = $(element).find('span.instancename');
-      const linkElement = $(element).find('a.aalink');
-      const isResource = $(element).hasClass('modtype_resource');
+    const resultats = [];
+
+    $('a[onclick*="window.open"]').each((i, elem) => {
+      const titre = $(elem).text().trim();
+      const onclick = $(elem).attr('onclick');
       
-      if (titleElement.length && linkElement.length) {
-        let title = titleElement.clone().children('span.accesshide').remove().end().text().trim();
-        const url = linkElement.attr('href');
-        
-        if (title && url) {
-          pdfs.push({
-            titre: title,
-            url_page: url,
-            type: isResource ? 'pdf' : 'page',
-            url_pdf: null
-          });
+      if (onclick) {
+        const match = onclick.match(/window\.open\('([^']+)'/);
+        if (match) {
+          const urlPdf = match[1];
+          if (urlPdf.includes('view.php')) {
+            resultats.push({
+              titre: titre,
+              url_pdf: urlPdf
+            });
+          }
         }
       }
     });
-    
-    if (getDirectLinks) {
-      const pdfPromises = pdfs.map(async (pdf) => {
-        if (pdf.type === 'pdf') {
-          const directUrl = await getDirectPdfUrl(pdf.url_page);
-          if (directUrl) {
-            pdf.url_pdf = directUrl;
-          }
-        }
-        return pdf;
-      });
-      
-      await Promise.all(pdfPromises);
-    }
-    
-    if (searchTerm) {
-      const normalizedSearch = searchTerm.toLowerCase().trim();
-      const searchWords = normalizedSearch.split(/\s+/).filter(word => word.length > 0);
-      
-      if (searchWords.includes('liste') || searchWords.includes('all') || searchWords.includes('tout') || searchWords.includes('tous')) {
-        return pdfs;
-      }
-      
-      return pdfs.filter(pdf => {
-        const titleLower = pdf.titre.toLowerCase()
-          .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        
-        return searchWords.every(word => {
-          const normalizedWord = word.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-          
-          if (normalizedWord === 'pc' || normalizedWord === 'spc') {
-            return titleLower.includes('physique') || titleLower.includes('pc') || titleLower.includes('spc');
-          }
-          
-          return titleLower.includes(normalizedWord);
-        });
-      });
-    }
-    
-    return pdfs;
+
+    return resultats;
   } catch (error) {
     console.error('Erreur lors du scraping:', error.message);
-    throw error;
+    return [];
   }
 }
 
-async function scrapeCorrections(searchTerm = '', getDirectLinks = false) {
+// Fonction pour obtenir le lien direct du PDF
+async function obtenirLienDirectPDF(urlPage) {
   try {
-    const response = await axios.get(BASE_URL_CORRECTIONS, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      }
-    });
-    
+    const response = await axios.get(urlPage);
     const $ = cheerio.load(response.data);
-    const corrections = [];
     
-    $('li.activity.modtype_resource, div.activity.modtype_resource').each((index, element) => {
-      const linkElement = $(element).find('a.aalink');
-      const titleElement = $(element).find('span.instancename');
-      
-      if (titleElement.length && linkElement.length) {
-        let title = titleElement.clone().children('span.accesshide').remove().end().text().trim();
-        const url = linkElement.attr('href');
-        
-        const titleLower = title.toLowerCase();
-        if (title && url && (titleLower.includes('corrig') || titleLower.includes('correction'))) {
-          corrections.push({
-            titre: title,
-            url_page: url,
-            type: 'pdf',
-            url_pdf: null
-          });
-        }
+    let lienPDF = null;
+    $('a').each((i, elem) => {
+      const href = $(elem).attr('href');
+      if (href && href.endsWith('.pdf')) {
+        lienPDF = href;
+        return false;
       }
     });
-    
-    if (getDirectLinks) {
-      const pdfPromises = corrections.map(async (pdf) => {
-        const directUrl = await getDirectPdfUrl(pdf.url_page);
-        if (directUrl) {
-          pdf.url_pdf = directUrl;
-        }
-        return pdf;
-      });
-      
-      await Promise.all(pdfPromises);
-    }
-    
-    if (searchTerm) {
-      const normalizedSearch = searchTerm.toLowerCase().trim();
-      const searchWords = normalizedSearch.split(/\s+/).filter(word => word.length > 0);
-      
-      if (searchWords.includes('liste') || searchWords.includes('all') || searchWords.includes('tout') || searchWords.includes('tous')) {
-        return corrections;
-      }
-      
-      return corrections.filter(pdf => {
-        const titleLower = pdf.titre.toLowerCase()
-          .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        
-        return searchWords.every(word => {
-          const normalizedWord = word.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-          
-          if (normalizedWord === 'pc' || normalizedWord === 'spc') {
-            return titleLower.includes('physique') || titleLower.includes('pc') || titleLower.includes('spc');
-          }
-          
-          if (normalizedWord === 'a') {
-            return titleLower.includes('serie a') || titleLower.includes('série a');
-          }
-          
-          return titleLower.includes(normalizedWord);
-        });
-      });
-    }
-    
-    return corrections;
+
+    return lienPDF;
   } catch (error) {
-    console.error('Erreur lors du scraping des corrections:', error.message);
-    throw error;
+    console.error('Erreur lors de la récupération du lien direct:', error.message);
+    return null;
   }
 }
 
-async function scrapeMaths(searchTerm = '', getDirectLinks = false) {
-  try {
-    const response = await axios.get(BASE_URL_MATHS, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      }
-    });
-    
-    const $ = cheerio.load(response.data);
-    const maths = [];
-    
-    $('li.activity.modtype_resource, div.activity.modtype_resource').each((index, element) => {
-      const linkElement = $(element).find('a.aalink');
-      const titleElement = $(element).find('span.instancename');
-      
-      if (titleElement.length && linkElement.length) {
-        let title = titleElement.clone().children('span.accesshide').remove().end().text().trim();
-        const url = linkElement.attr('href');
-        
-        const titleLower = title.toLowerCase();
-        if (title && url && (titleLower.includes('math') || titleLower.includes('bacc'))) {
-          maths.push({
-            titre: title,
-            url_page: url,
-            type: 'pdf',
-            url_pdf: null
-          });
-        }
-      }
-    });
-    
-    $('li.activity.modtype_page, div.activity.modtype_page').each((index, element) => {
-      const linkElement = $(element).find('a.aalink');
-      const titleElement = $(element).find('span.instancename');
-      
-      if (titleElement.length && linkElement.length) {
-        let title = titleElement.clone().children('span.accesshide').remove().end().text().trim();
-        const url = linkElement.attr('href');
-        
-        const titleLower = title.toLowerCase();
-        if (title && url && (titleLower.includes('math') || titleLower.includes('bacc'))) {
-          maths.push({
-            titre: title,
-            url_page: url,
-            type: 'page',
-            url_pdf: null
-          });
-        }
-      }
-    });
-    
-    if (getDirectLinks) {
-      const pdfPromises = maths.map(async (pdf) => {
-        if (pdf.type === 'pdf') {
-          const directUrl = await getDirectPdfUrl(pdf.url_page);
-          if (directUrl) {
-            pdf.url_pdf = directUrl;
-          }
-        }
-        return pdf;
-      });
-      
-      await Promise.all(pdfPromises);
-    }
-    
-    if (searchTerm) {
-      const normalizedSearch = searchTerm.toLowerCase().trim();
-      const searchWords = normalizedSearch.split(/\s+/).filter(word => word.length > 0);
-      
-      if (searchWords.includes('liste') || searchWords.includes('all') || searchWords.includes('tout') || searchWords.includes('tous')) {
-        return maths;
-      }
-      
-      return maths.filter(pdf => {
-        const titleLower = pdf.titre.toLowerCase()
-          .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        
-        return searchWords.every(word => {
-          const normalizedWord = word.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-          
-          if (normalizedWord === 'a') {
-            return titleLower.includes('serie a') || titleLower.includes('série a');
-          }
-          
-          return titleLower.includes(normalizedWord);
-        });
-      });
-    }
-    
-    return maths;
-  } catch (error) {
-    console.error('Erreur lors du scraping des maths:', error.message);
-    throw error;
+// Fonction pour filtrer les résultats
+function filtrerResultats(resultats, terme) {
+  if (!terme || terme.toLowerCase() === 'liste') {
+    return resultats;
   }
+  
+  const termeNormalise = terme.toLowerCase();
+  return resultats.filter(r => 
+    r.titre.toLowerCase().includes(termeNormalise)
+  );
 }
 
-async function scrapeMathsCorrections(searchTerm = '', getDirectLinks = false) {
-  try {
-    const response = await axios.get(BASE_URL_MATHS_CORRECTIONS, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      }
-    });
-    
-    const $ = cheerio.load(response.data);
-    const corrections = [];
-    
-    $('li.activity.modtype_resource, div.activity.modtype_resource').each((index, element) => {
-      const linkElement = $(element).find('a.aalink');
-      const titleElement = $(element).find('span.instancename');
-      
-      if (titleElement.length && linkElement.length) {
-        let title = titleElement.clone().children('span.accesshide').remove().end().text().trim();
-        const url = linkElement.attr('href');
-        
-        const titleLower = title.toLowerCase();
-        if (title && url && (titleLower.includes('corrig') || titleLower.includes('math'))) {
-          corrections.push({
-            titre: title,
-            url_page: url,
-            type: 'pdf',
-            url_pdf: null
-          });
-        }
-      }
-    });
-    
-    if (getDirectLinks) {
-      const pdfPromises = corrections.map(async (pdf) => {
-        const directUrl = await getDirectPdfUrl(pdf.url_page);
-        if (directUrl) {
-          pdf.url_pdf = directUrl;
-        }
-        return pdf;
-      });
-      
-      await Promise.all(pdfPromises);
+// Route principale
+app.get('/', (req, res) => {
+  res.json({
+    message: 'API PDF Scraper EDUCMAD',
+    usage: {
+      recherche: '/recherche?pdf=<terme>',
+      exemples: [
+        '/recherche - Tous les sujets PC',
+        '/recherche?pdf=PC A 2020 - Sujet spécifique',
+        '/recherche?pdf=cor PC A 2023 - Correction PC',
+        '/recherche?pdf=Math A 2022 - Sujet Math',
+        '/recherche?pdf=cor Math A 2014 - Correction Math',
+        '/recherche?pdf=PC A 2023&direct=true - Avec lien direct du PDF'
+      ],
+      convertir: '/convertir?url=<url> - Convertir HTML en PDF'
     }
-    
-    if (searchTerm) {
-      const normalizedSearch = searchTerm.toLowerCase().trim();
-      const searchWords = normalizedSearch.split(/\s+/).filter(word => word.length > 0);
-      
-      if (searchWords.includes('liste') || searchWords.includes('all') || searchWords.includes('tout') || searchWords.includes('tous')) {
-        return corrections;
-      }
-      
-      return corrections.filter(pdf => {
-        const titleLower = pdf.titre.toLowerCase()
-          .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        
-        return searchWords.every(word => {
-          const normalizedWord = word.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-          
-          if (normalizedWord === 'a') {
-            return titleLower.includes('serie a') || titleLower.includes('série a');
-          }
-          
-          return titleLower.includes(normalizedWord);
-        });
-      });
-    }
-    
-    return corrections;
-  } catch (error) {
-    console.error('Erreur lors du scraping des corrections maths:', error.message);
-    throw error;
-  }
-}
+  });
+});
 
+// Route de recherche
 app.get('/recherche', async (req, res) => {
   try {
-    const searchTerm = req.query.pdf || '';
-    const getDirectLinks = req.query.direct === 'true' || req.query.direct === '1';
+    const recherche = req.query.pdf || 'tous';
+    const demanderLienDirect = req.query.direct === 'true';
     
-    const normalizedSearch = searchTerm.toLowerCase().trim();
-    const isMathsCorrection = normalizedSearch.startsWith('cor math ') || normalizedSearch.startsWith('cor math');
-    const isCorrection = !isMathsCorrection && (normalizedSearch.startsWith('cor ') || (normalizedSearch.startsWith('cor') && normalizedSearch.length <= 3));
-    const isMaths = normalizedSearch.startsWith('math ') || (normalizedSearch.startsWith('math') && normalizedSearch.length <= 4);
-    
-    let results;
-    let searchTermForScraper = searchTerm;
-    let searchType = 'sujets';
-    
-    if (isMathsCorrection) {
-      searchTermForScraper = searchTerm.replace(/^cor\s*math\s*/i, '').trim();
-      results = await scrapeMathsCorrections(searchTermForScraper, getDirectLinks);
-      searchType = 'corrections_mathematiques';
-    } else if (isCorrection) {
-      searchTermForScraper = searchTerm.replace(/^cor\s*/i, '').trim();
-      results = await scrapeCorrections(searchTermForScraper, getDirectLinks);
-      searchType = 'corrections';
-    } else if (isMaths) {
-      searchTermForScraper = searchTerm.replace(/^math\s*/i, '').trim();
-      results = await scrapeMaths(searchTermForScraper, getDirectLinks);
-      searchType = 'mathematiques';
+    let resultats = [];
+    let sourceUrl = '';
+    let typeRecherche = '';
+
+    // Déterminer le type de recherche
+    if (recherche.toLowerCase().startsWith('cor math')) {
+      // Corrections Mathématiques
+      sourceUrl = SOURCES.correctionsMath;
+      typeRecherche = 'Corrections Mathématiques série A';
+      resultats = await scraperSection(sourceUrl);
+      const terme = recherche.replace(/^cor math\s*/i, '').trim();
+      resultats = filtrerResultats(resultats, terme);
+    } else if (recherche.toLowerCase().startsWith('cor')) {
+      // Corrections PC
+      sourceUrl = SOURCES.correctionsPC;
+      typeRecherche = 'Corrections PC série A';
+      resultats = await scraperSection(sourceUrl);
+      const terme = recherche.replace(/^cor\s*/i, '').trim();
+      resultats = filtrerResultats(resultats, terme);
+    } else if (recherche.toLowerCase().startsWith('math')) {
+      // Sujets Mathématiques
+      sourceUrl = SOURCES.sujetsMath;
+      typeRecherche = 'Sujets Mathématiques série A';
+      resultats = await scraperSection(sourceUrl);
+      const terme = recherche.replace(/^math\s*/i, '').trim();
+      resultats = filtrerResultats(resultats, terme);
     } else {
-      results = await scrapePDFs(searchTerm, getDirectLinks);
+      // Sujets PC par défaut
+      sourceUrl = SOURCES.sujetsPC;
+      typeRecherche = 'Sujets PC série A';
+      resultats = await scraperSection(sourceUrl);
+      resultats = filtrerResultats(resultats, recherche === 'tous' ? '' : recherche);
     }
-    
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    
-    const formattedResults = results.map(pdf => {
-      const result = {
-        titre: pdf.titre,
-        type: pdf.type === 'pdf' ? 'PDF telechargeble' : 'Page HTML (convertible en PDF)',
-        url_page: pdf.url_page
-      };
-      
-      if (pdf.url_pdf) {
-        result.url_pdf_direct = pdf.url_pdf;
+
+    // Obtenir les liens directs si demandé
+    if (demanderLienDirect && resultats.length > 0) {
+      for (let resultat of resultats) {
+        const lienDirect = await obtenirLienDirectPDF(resultat.url_pdf);
+        if (lienDirect) {
+          resultat.lien_direct_pdf = lienDirect;
+        }
       }
-      
-      if (pdf.type === 'page') {
-        result.url_convertir_pdf = `${baseUrl}/convertir?url=${encodeURIComponent(pdf.url_page)}`;
-      }
-      
-      return result;
-    });
-    
-    let infoMessage = "Pour les Pages HTML, utilisez url_convertir_pdf pour telecharger en PDF";
-    if (searchType === 'corrections') {
-      infoMessage = "Corrections du Bacc PC série A";
-    } else if (searchType === 'mathematiques') {
-      infoMessage = "Énoncés Bacc Mathématiques série A (1999-2022)";
-    } else if (searchType === 'corrections_mathematiques') {
-      infoMessage = "Corrections Bacc Mathématiques série A";
     }
-    
+
     res.json({
       success: true,
-      count: formattedResults.length,
-      recherche: searchTerm || 'tous',
-      type: searchType,
-      info: infoMessage,
-      resultats: formattedResults
+      type: typeRecherche,
+      source: sourceUrl,
+      recherche: recherche,
+      count: resultats.length,
+      resultats: resultats
     });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Erreur lors de la récupération des PDFs',
-      message: error.message
-    });
-  }
-});
 
-app.get('/convertir', async (req, res) => {
-  try {
-    const pageUrl = req.query.url;
-    
-    if (!pageUrl) {
-      return res.status(400).json({
-        success: false,
-        error: 'URL manquante',
-        usage: '/convertir?url=<url_de_la_page>'
-      });
-    }
-    
-    console.log(`Conversion en PDF: ${pageUrl}`);
-    const startTime = Date.now();
-    
-    const result = await convertPageToPdfBuffer(pageUrl);
-    
-    const duration = Date.now() - startTime;
-    console.log(`PDF généré en ${duration}ms`);
-    
-    const pdfId = generatePdfId();
-    
-    const cleanTitle = result.title
-      .replace(/[<>:"/\\|?*]/g, '')
-      .replace(/\s+/g, '_')
-      .substring(0, 50);
-    const filename = cleanTitle ? `${cleanTitle}.pdf` : 'document.pdf';
-    
-    pdfCache.set(pdfId, {
-      buffer: Buffer.from(result.buffer),
-      filename: filename,
-      sourceUrl: pageUrl,
-      title: result.title,
-      createdAt: Date.now()
-    });
-    
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    
-    res.json({
-      success: true,
-      message: 'PDF converti avec succes',
-      titre: result.title,
-      type: 'PDF converti',
-      url_source: pageUrl,
-      url_pdf: `${baseUrl}/download/${pdfId}`,
-      taille: Buffer.from(result.buffer).length,
-      duree_conversion_ms: duration,
-      expire_dans: '10 minutes'
-    });
-    
-  } catch (error) {
-    console.error('Erreur conversion PDF:', error.message);
-    res.status(500).json({
-      success: false,
-      error: 'Erreur lors de la conversion en PDF',
-      message: error.message
-    });
-  }
-});
-
-app.get('/download/:id', (req, res) => {
-  const pdfId = req.params.id;
-  const pdfData = pdfCache.get(pdfId);
-  
-  if (!pdfData) {
-    return res.status(404).json({
-      success: false,
-      error: 'PDF non trouve ou expire',
-      message: 'Le PDF demande n\'existe pas ou a expire. Veuillez le reconvertir.'
-    });
-  }
-  
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="${pdfData.filename}"`);
-  res.setHeader('Content-Length', pdfData.buffer.length);
-  
-  res.end(pdfData.buffer);
-});
-
-app.get('/warmup', async (req, res) => {
-  try {
-    console.log('Warmup: initialisation du navigateur...');
-    const browser = await getPersistentBrowser();
-    const ready = browser !== null && browser.isConnected();
-    if (isVercel) {
-      await browser.close();
-    }
-    res.json({ 
-      success: true, 
-      message: 'Navigateur pret',
-      browserReady: ready
-    });
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -797,95 +167,50 @@ app.get('/warmup', async (req, res) => {
   }
 });
 
-app.get('/', (req, res) => {
-  res.json({
-    message: 'API Scraper PDF EDUCMAD',
-    environment: isReplit ? 'Replit' : (isVercel ? 'Vercel' : 'Other'),
-    routes: {
-      '/recherche': 'Rechercher les PDFs (sujets PC, corrections PC, mathematiques, corrections mathematiques)',
-      '/convertir': 'Convertir une page HTML en PDF (retourne JSON avec URL de telechargement)',
-      '/download/:id': 'Telecharger un PDF converti',
-      '/warmup': 'Pre-charger le navigateur pour des conversions plus rapides'
-    },
-    exemples: {
-      'Sujets_PC': {
-        'PDF specifique': '/recherche?pdf=PC A 2020',
-        'Avec lien direct': '/recherche?pdf=PC A 2023&direct=true',
-        'Tous les PDFs': '/recherche?pdf=PC A liste'
-      },
-      'Corrections_PC': {
-        'Correction specifique': '/recherche?pdf=cor PC A 2000',
-        'Avec lien direct': '/recherche?pdf=cor PC A 2023&direct=true',
-        'Toutes les corrections': '/recherche?pdf=cor PC A liste'
-      },
-      'Mathematiques': {
-        'Math specifique': '/recherche?pdf=Math A 2000',
-        'Avec lien direct': '/recherche?pdf=Math A 2022&direct=true',
-        'Tous les Maths': '/recherche?pdf=Math A liste'
-      },
-      'Corrections_Mathematiques': {
-        'Correction Math specifique': '/recherche?pdf=cor Math A 2014',
-        'Avec lien direct': '/recherche?pdf=cor Math A 2023&direct=true',
-        'Toutes les corrections Math': '/recherche?pdf=cor Math A liste'
-      },
-      'Convertir_page': {
-        'Convertir': '/convertir?url=http://mediatheque.accesmad.org/educmad/mod/page/view.php?id=26053',
-        'Reponse': 'JSON avec url_pdf pour telecharger'
-      }
-    }
-  });
+// Route de conversion HTML vers PDF
+app.get('/convertir', async (req, res) => {
+  const url = req.query.url;
+
+  if (!url) {
+    return res.status(400).json({
+      success: false,
+      error: 'URL manquante. Usage: /convertir?url=<url>'
+    });
+  }
+
+  try {
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+    });
+
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: 'networkidle0' });
+    
+    const pdf = await page.pdf({
+      format: 'A4',
+      printBackground: true
+    });
+
+    await browser.close();
+
+    res.contentType('application/pdf');
+    res.send(pdf);
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    environment: isReplit ? 'Replit' : (isVercel ? 'Vercel' : 'Other'),
-    browserReady: !isVercel && persistentBrowser !== null && persistentBrowser.isConnected(),
-    browserLocked: browserLock,
-    pdfsEnCache: pdfCache.size
-  });
-});
-
-function startKeepAlive() {
-  if (RENDER_EXTERNAL_URL) {
-    console.log(`Auto-ping active pour: ${RENDER_EXTERNAL_URL}`);
-    
-    setInterval(async () => {
-      try {
-        const response = await axios.get(`${RENDER_EXTERNAL_URL}/health`);
-        console.log(`[${new Date().toISOString()}] Ping OK - Status: ${response.status}`);
-      } catch (error) {
-        console.error(`[${new Date().toISOString()}] Ping erreur:`, error.message);
-      }
-    }, PING_INTERVAL);
-    
-    setTimeout(async () => {
-      try {
-        console.log('Auto-warmup du navigateur...');
-        await getPersistentBrowser();
-        console.log('Navigateur pret pour les conversions');
-      } catch (error) {
-        console.error('Erreur warmup:', error.message);
-      }
-    }, 5000);
-  }
-}
-
-if (!isVercel) {
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Serveur demarre sur le port ${PORT}`);
-    startKeepAlive();
-  });
-}
-
-process.on('SIGTERM', async () => {
-  console.log('Arret du serveur...');
-  if (persistentBrowser) {
-    await persistentBrowser.close();
-  }
-  process.exit(0);
+// Démarrage du serveur
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Serveur démarré sur le port ${PORT}`);
+  console.log(`📚 API PDF Scraper EDUCMAD prête`);
 });
 
 module.exports = app;
