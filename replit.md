@@ -7,6 +7,7 @@ API Flask pour récupérer les PDFs des sujets et corrections du Baccalauréat d
 - **Mathematiques** (série A) - id: 817
 - **Physique** (série A) - id: 819
 - **Histoire-Géographie** (série A et C-D) - id: 132
+- **Malagasy** (séries A, C-D, S, OSE) - id: 130
 
 ## Fonctionnalités
 - Scraping automatique des titres et URLs des PDFs
@@ -23,8 +24,8 @@ Page d'accueil avec la liste des endpoints et exemples
 
 ### GET /recherche
 Recherche avec filtres:
-- `pdf` : filtre par nom/matière (mathematiques, physique, hg)
-- `serie` : filtre par série (A, C, D, L)
+- `pdf` : filtre par nom/matière (mathematiques, physique, hg, malagasy)
+- `serie` : filtre par série (A, C, D, S, OSE)
 - `annee` : filtre par année (1999 à 2023)
 - `type` : filtre par type (`sujet` ou `correction`)
 
@@ -54,11 +55,26 @@ Recherche avec filtres:
 
 Note: Les séries C et D partagent le même contenu pour HG.
 
+**Exemples Malagasy:**
+```
+/recherche?pdf=malagasy&serie=A&type=sujet
+/recherche?pdf=malagasy&serie=A&type=sujet&annee=2019
+/recherche?pdf=malagasy&serie=C&type=sujet
+/recherche?pdf=malagasy&serie=D&type=sujet
+/recherche?pdf=malagasy&serie=C&type=sujet&annee=2019
+/recherche?pdf=malagasy&serie=S&type=sujet
+/recherche?pdf=malagasy&serie=S&type=sujet&annee=2022
+/recherche?pdf=malagasy&serie=OSE&type=sujet
+/recherche?pdf=malagasy&serie=OSE&type=sujet&annee=2022
+```
+
+Note: Les séries C et D partagent le même contenu pour Malagasy. Les séries S et OSE ne contiennent que les années 2022-2023.
+
 **Réponse JSON:**
 ```json
 {
   "filtres": {
-    "pdf": "hg",
+    "pdf": "malagasy",
     "serie": "A",
     "annee": "2023",
     "type": "sujet"
@@ -66,14 +82,14 @@ Note: Les séries C et D partagent le même contenu pour HG.
   "total": 1,
   "resultats": [
     {
-      "titre": "Histo Géo série A 2023 -énoncé",
+      "titre": "Malagasy série A 2023 énoncé",
       "annee": "2023",
       "serie": "A",
-      "matiere": "Histoire-Geo",
+      "matiere": "Malagasy",
       "type": "sujet",
       "format": "pdf",
-      "id": "57567",
-      "url_telechargement": "https://.../pdf/57567"
+      "id": "57580",
+      "url_telechargement": "https://.../pdf/57580"
     }
   ]
 }
@@ -102,6 +118,12 @@ Télécharge une page HTML convertie en PDF.
 - **Série A**: 1999-2005, 2008-2011, 2013-2017, 2023
 - **Séries C-D**: 1999-2005, 2008-2011, 2013-2017, 2023
 
+### Malagasy
+- **Série A**: 1999-2023 (2013-2023 en PDF, 1999-2011 en pages)
+- **Séries C-D**: 1999-2023 (2013-2023 en PDF, 1999-2011 en pages)
+- **Série S**: 2022-2023 (PDF uniquement)
+- **Série OSE**: 2022-2023 (PDF uniquement)
+
 ## Structure des fichiers
 ```
 ├── main.py           # Application Flask principale
@@ -126,6 +148,10 @@ gunicorn --bind=0.0.0.0:5000 --reuse-port main:app
 - Mathématiques/Physique: Section 1 = Sujets, Section 2 = Corrections
 - HG série A: Section 1 = Sujets et Corrections
 - HG séries C-D: Section 2 = Sujets et Corrections
+- Malagasy série A: Section 1 = Sujets et Corrections
+- Malagasy séries C-D: Section 2 = Sujets et Corrections
+- Malagasy série S: Section 3 = Sujets et Corrections
+- Malagasy série OSE: Section 4 = Sujets et Corrections
 
 ## Notes techniques
 - Les URLs `/pdf/<id>` redirigent directement vers le PDF
@@ -140,6 +166,10 @@ COURSES = {
     'mathematiques': {'id': 817, 'name': 'Mathematiques', 'serie': 'A', 'sections': {'sujet': 1, 'correction': 2}},
     'physique': {'id': 819, 'name': 'Physique', 'serie': 'A', 'sections': {'sujet': 1, 'correction': 2}},
     'hg_a': {'id': 132, 'name': 'Histoire-Geo', 'serie': 'A', 'sections': {'sujet': 1, 'correction': 1}},
-    'hg_cd': {'id': 132, 'name': 'Histoire-Geo', 'serie': 'C-D', 'sections': {'sujet': 2, 'correction': 2}}
+    'hg_cd': {'id': 132, 'name': 'Histoire-Geo', 'serie': 'C-D', 'sections': {'sujet': 2, 'correction': 2}},
+    'malagasy_a': {'id': 130, 'name': 'Malagasy', 'serie': 'A', 'sections': {'sujet': 1, 'correction': 1}},
+    'malagasy_cd': {'id': 130, 'name': 'Malagasy', 'serie': 'C-D', 'sections': {'sujet': 2, 'correction': 2}},
+    'malagasy_s': {'id': 130, 'name': 'Malagasy', 'serie': 'S', 'sections': {'sujet': 3, 'correction': 3}},
+    'malagasy_ose': {'id': 130, 'name': 'Malagasy', 'serie': 'OSE', 'sections': {'sujet': 4, 'correction': 4}}
 }
 ```

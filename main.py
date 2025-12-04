@@ -57,6 +57,30 @@ COURSES = {
         'name': 'Histoire-Geo',
         'serie': 'C-D',
         'sections': {'sujet': 2, 'correction': 2}
+    },
+    'malagasy_a': {
+        'id': 130,
+        'name': 'Malagasy',
+        'serie': 'A',
+        'sections': {'sujet': 1, 'correction': 1}
+    },
+    'malagasy_cd': {
+        'id': 130,
+        'name': 'Malagasy',
+        'serie': 'C-D',
+        'sections': {'sujet': 2, 'correction': 2}
+    },
+    'malagasy_s': {
+        'id': 130,
+        'name': 'Malagasy',
+        'serie': 'S',
+        'sections': {'sujet': 3, 'correction': 3}
+    },
+    'malagasy_ose': {
+        'id': 130,
+        'name': 'Malagasy',
+        'serie': 'OSE',
+        'sections': {'sujet': 4, 'correction': 4}
     }
 }
 
@@ -178,6 +202,8 @@ def extract_serie(text):
     text_lower = text.lower()
     if 'série c-d' in text_lower or 'serie c-d' in text_lower or 'séries c-d' in text_lower or 'series c-d' in text_lower:
         return 'C-D'
+    elif 'série ose' in text_lower or 'serie ose' in text_lower or ' ose ' in text_lower:
+        return 'OSE'
     elif 'série a' in text_lower or 'serie a' in text_lower or ' a ' in text_lower:
         return 'A'
     elif 'série c' in text_lower or 'serie c' in text_lower or ' c ' in text_lower:
@@ -186,7 +212,7 @@ def extract_serie(text):
         return 'D'
     elif 'série l' in text_lower or 'serie l' in text_lower or ' l ' in text_lower:
         return 'L'
-    elif 'série s' in text_lower or 'serie s' in text_lower:
+    elif 'série s' in text_lower or 'serie s' in text_lower or ' s ' in text_lower:
         return 'S'
     return None
 
@@ -301,6 +327,28 @@ def scrape_all_pdfs(subject_filter=None, serie_filter=None):
                     courses_to_scrape = ['hg_a', 'hg_cd']
             else:
                 courses_to_scrape = ['hg_a', 'hg_cd']
+            
+            for course_key in courses_to_scrape:
+                course = COURSES[course_key]
+                pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
+                if isinstance(pdfs, list):
+                    all_pdfs.extend(pdfs)
+        elif subject_lower == 'malagasy':
+            courses_to_scrape = []
+            if serie_filter:
+                serie_upper = serie_filter.upper()
+                if serie_upper == 'A':
+                    courses_to_scrape = ['malagasy_a']
+                elif serie_upper in ['C', 'D', 'C-D']:
+                    courses_to_scrape = ['malagasy_cd']
+                elif serie_upper == 'S':
+                    courses_to_scrape = ['malagasy_s']
+                elif serie_upper == 'OSE':
+                    courses_to_scrape = ['malagasy_ose']
+                else:
+                    courses_to_scrape = ['malagasy_a', 'malagasy_cd', 'malagasy_s', 'malagasy_ose']
+            else:
+                courses_to_scrape = ['malagasy_a', 'malagasy_cd', 'malagasy_s', 'malagasy_ose']
             
             for course_key in courses_to_scrape:
                 course = COURSES[course_key]
@@ -461,14 +509,14 @@ def home():
     base_url = get_api_base_url()
     return jsonify({
         'message': 'API Baccalauréat Madagascar - Téléchargement PDF',
-        'matieres_disponibles': ['mathematiques', 'physique', 'hg'],
+        'matieres_disponibles': ['mathematiques', 'physique', 'hg', 'malagasy'],
         'endpoints': {
             '/recherche': 'Recherche des sujets et corrections de bac',
             '/pdf/<id>': 'Télécharge un PDF directement (redirige vers le fichier)'
         },
         'parametres': {
-            'pdf': 'Filtre par matière (mathematiques, physique, hg)',
-            'serie': 'Filtre par série (A, C, D, L)',
+            'pdf': 'Filtre par matière (mathematiques, physique, hg, malagasy)',
+            'serie': 'Filtre par série (A, C, D, S, OSE)',
             'annee': 'Filtre par année (1999 à 2023)',
             'type': 'Filtre par type (sujet ou correction)'
         },
@@ -489,10 +537,21 @@ def home():
             'Sujets HG série C (ou D)': f'{base_url}/recherche?pdf=hg&serie=C&type=sujet',
             'Sujet HG série C 2019': f'{base_url}/recherche?pdf=hg&serie=C&type=sujet&annee=2019'
         },
+        'exemples_malagasy': {
+            'Sujets Malagasy série A': f'{base_url}/recherche?pdf=malagasy&serie=A&type=sujet',
+            'Sujet Malagasy série A 2019': f'{base_url}/recherche?pdf=malagasy&serie=A&type=sujet&annee=2019',
+            'Sujets Malagasy série C (ou D)': f'{base_url}/recherche?pdf=malagasy&serie=C&type=sujet',
+            'Sujet Malagasy série C 2019': f'{base_url}/recherche?pdf=malagasy&serie=C&type=sujet&annee=2019',
+            'Sujets Malagasy série S': f'{base_url}/recherche?pdf=malagasy&serie=S&type=sujet',
+            'Sujet Malagasy série S 2022': f'{base_url}/recherche?pdf=malagasy&serie=S&type=sujet&annee=2022',
+            'Sujets Malagasy série OSE': f'{base_url}/recherche?pdf=malagasy&serie=OSE&type=sujet',
+            'Sujet Malagasy série OSE 2022': f'{base_url}/recherche?pdf=malagasy&serie=OSE&type=sujet&annee=2022'
+        },
         'notes': {
             'pdf_direct': 'Les années 2013-2023 sont des fichiers PDF directs',
             'page_capture': 'Les années 1999-2011 sont des pages HTML converties en PDF automatiquement',
-            'serie_cd': 'Pour HG, les séries C et D partagent le même contenu'
+            'serie_cd': 'Pour HG et Malagasy, les séries C et D partagent le même contenu',
+            'serie_s_ose': 'Pour Malagasy, les séries S et OSE ne contiennent que les années 2022-2023'
         },
         'utilisation': 'Faites une recherche, puis cliquez sur url_telechargement pour télécharger le PDF'
     })
