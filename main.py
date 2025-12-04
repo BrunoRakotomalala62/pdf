@@ -99,6 +99,30 @@ COURSES = {
         'name': 'Philosophie',
         'serie': 'L',
         'sections': {'sujet': 3, 'correction': 3}
+    },
+    'francais_acd': {
+        'id': 134,
+        'name': 'Francais',
+        'serie': 'A-C-D',
+        'sections': {'sujet': 1, 'correction': 1}
+    },
+    'francais_l': {
+        'id': 134,
+        'name': 'Francais',
+        'serie': 'L',
+        'sections': {'sujet': 1, 'correction': 1}
+    },
+    'francais_s': {
+        'id': 134,
+        'name': 'Francais',
+        'serie': 'S',
+        'sections': {'sujet': 1, 'correction': 1}
+    },
+    'francais_ose': {
+        'id': 134,
+        'name': 'Francais',
+        'serie': 'OSE',
+        'sections': {'sujet': 1, 'correction': 1}
     }
 }
 
@@ -218,7 +242,11 @@ def detect_type_from_title(text):
 
 def extract_serie(text):
     text_lower = text.lower()
-    if 'série c-d' in text_lower or 'serie c-d' in text_lower or 'séries c-d' in text_lower or 'series c-d' in text_lower:
+    if 'série a-c-d' in text_lower or 'serie a-c-d' in text_lower or 'séries a-c-d' in text_lower or 'series a-c-d' in text_lower:
+        return 'A-C-D'
+    elif 'série acd' in text_lower or 'serie acd' in text_lower or 'séries acd' in text_lower or 'series acd' in text_lower:
+        return 'A-C-D'
+    elif 'série c-d' in text_lower or 'serie c-d' in text_lower or 'séries c-d' in text_lower or 'series c-d' in text_lower:
         return 'C-D'
     elif 'série cd' in text_lower or 'serie cd' in text_lower or 'séries cd' in text_lower or 'series cd' in text_lower:
         return 'C-D'
@@ -383,6 +411,28 @@ def scrape_all_pdfs(subject_filter=None, serie_filter=None):
                 pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
                 if isinstance(pdfs, list):
                     all_pdfs.extend(pdfs)
+        elif subject_lower == 'francais' or subject_lower == 'français':
+            courses_to_scrape = []
+            if serie_filter:
+                serie_upper = serie_filter.upper()
+                if serie_upper in ['A', 'C', 'D', 'A-C-D', 'ACD']:
+                    courses_to_scrape = ['francais_acd']
+                elif serie_upper == 'L':
+                    courses_to_scrape = ['francais_l']
+                elif serie_upper == 'S':
+                    courses_to_scrape = ['francais_s']
+                elif serie_upper == 'OSE':
+                    courses_to_scrape = ['francais_ose']
+                else:
+                    courses_to_scrape = ['francais_acd', 'francais_l', 'francais_s', 'francais_ose']
+            else:
+                courses_to_scrape = ['francais_acd', 'francais_l', 'francais_s', 'francais_ose']
+            
+            for course_key in courses_to_scrape:
+                course = COURSES[course_key]
+                pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
+                if isinstance(pdfs, list):
+                    all_pdfs.extend(pdfs)
         elif subject_lower in COURSES:
             course = COURSES[subject_lower]
             pdfs = scrape_course(course['id'], course['name'], course.get('sections'), course.get('serie'))
@@ -537,13 +587,13 @@ def home():
     base_url = get_api_base_url()
     return jsonify({
         'message': 'API Baccalauréat Madagascar - Téléchargement PDF',
-        'matieres_disponibles': ['mathematiques', 'physique', 'hg', 'malagasy', 'philosophie'],
+        'matieres_disponibles': ['mathematiques', 'physique', 'hg', 'malagasy', 'philosophie', 'francais'],
         'endpoints': {
             '/recherche': 'Recherche des sujets et corrections de bac',
             '/pdf/<id>': 'Télécharge un PDF directement (redirige vers le fichier)'
         },
         'parametres': {
-            'pdf': 'Filtre par matière (mathematiques, physique, hg, malagasy, philosophie)',
+            'pdf': 'Filtre par matière (mathematiques, physique, hg, malagasy, philosophie, francais)',
             'serie': 'Filtre par série (A, C, D, L, S, OSE)',
             'annee': 'Filtre par année (1999 à 2023)',
             'type': 'Filtre par type (sujet ou correction)'
@@ -583,12 +633,26 @@ def home():
             'Sujets Philosophie série L': f'{base_url}/recherche?pdf=philosophie&serie=L&type=sujet',
             'Sujet Philosophie série L 2022': f'{base_url}/recherche?pdf=philosophie&serie=L&type=sujet&annee=2022'
         },
+        'exemples_francais': {
+            'Sujets Français série A': f'{base_url}/recherche?pdf=francais&serie=A&type=sujet',
+            'Sujet Français série A 2019': f'{base_url}/recherche?pdf=francais&serie=A&type=sujet&annee=2019',
+            'Sujets Français série C (ou D)': f'{base_url}/recherche?pdf=francais&serie=C&type=sujet',
+            'Sujet Français série C 2019': f'{base_url}/recherche?pdf=francais&serie=C&type=sujet&annee=2019',
+            'Sujets Français série L': f'{base_url}/recherche?pdf=francais&serie=L&type=sujet',
+            'Sujet Français série L 2022': f'{base_url}/recherche?pdf=francais&serie=L&type=sujet&annee=2022',
+            'Sujets Français série S': f'{base_url}/recherche?pdf=francais&serie=S&type=sujet',
+            'Sujet Français série S 2023': f'{base_url}/recherche?pdf=francais&serie=S&type=sujet&annee=2023',
+            'Sujets Français série OSE': f'{base_url}/recherche?pdf=francais&serie=OSE&type=sujet',
+            'Sujet Français série OSE 2023': f'{base_url}/recherche?pdf=francais&serie=OSE&type=sujet&annee=2023'
+        },
         'notes': {
             'pdf_direct': 'Les années 2013-2023 sont des fichiers PDF directs',
             'page_capture': 'Les années 1999-2011 sont des pages HTML converties en PDF automatiquement',
             'serie_cd': 'Pour HG, Malagasy et Philosophie, les séries C et D partagent le même contenu',
+            'serie_acd_francais': 'Pour Français, les séries A, C et D partagent le même contenu',
             'serie_s_ose': 'Pour Malagasy, les séries S et OSE ne contiennent que les années 2022-2023',
-            'serie_l': 'Pour Philosophie, la série L ne contient que les années 2022-2023'
+            'serie_l': 'Pour Philosophie, la série L ne contient que les années 2022-2023',
+            'francais_series': 'Pour Français: séries A-C-D (1999-2023), L (2022), S (2023), OSE (2023)'
         },
         'utilisation': 'Faites une recherche, puis cliquez sur url_telechargement pour télécharger le PDF'
     })
@@ -622,8 +686,8 @@ def recherche():
         
         if serie_filter:
             pdf_serie = pdf['serie'] or ''
-            if serie_filter in ['C', 'D']:
-                if pdf_serie != serie_filter and pdf_serie != 'C-D':
+            if serie_filter in ['A', 'C', 'D']:
+                if pdf_serie != serie_filter and pdf_serie != 'C-D' and pdf_serie != 'A-C-D':
                     match = False
             elif pdf_serie != serie_filter:
                 match = False
