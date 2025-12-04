@@ -14,6 +14,7 @@ const BASE_URL_MATHS = 'http://mediatheque.accesmad.org/educmad/course/view.php?
 const BASE_URL_MATHS_CORRECTIONS = 'http://mediatheque.accesmad.org/educmad/course/view.php?id=817&section=2';
 
 const isReplit = process.env.REPL_ID !== undefined || process.env.REPLIT !== undefined;
+const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV !== undefined;
 
 let persistentBrowser = null;
 let browserLock = false;
@@ -40,17 +41,14 @@ function releaseBrowserLock() {
   lastBrowserActivity = Date.now();
 }
 
-async function getPersistentBrowser() {
-  if (persistentBrowser && persistentBrowser.isConnected()) {
-    return persistentBrowser;
-  }
-  
+async function createBrowser() {
   const puppeteerCore = require('puppeteer-core');
   
-  console.log('Création du navigateur persistant...');
+  console.log('Création du navigateur...');
+  console.log('Environnement: Replit=' + isReplit + ', Vercel=' + isVercel);
   
   if (isReplit) {
-    persistentBrowser = await puppeteerCore.launch({
+    return await puppeteerCore.launch({
       headless: 'new',
       executablePath: '/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium',
       args: [
@@ -61,41 +59,37 @@ async function getPersistentBrowser() {
         '--disable-software-rasterizer',
         '--disable-extensions',
         '--disable-background-networking',
-        '--disable-sync',
-        '--disable-translate',
-        '--no-first-run',
-        '--safebrowsing-disable-auto-update'
+        '--no-first-run'
       ]
     });
   } else {
-    const chromium = require('@sparticuz/chromium-min');
+    const chromium = require('@sparticuz/chromium');
+    
     chromium.setGraphicsMode = false;
     
-    const executablePath = await chromium.executablePath(
-      'https://github.com/Sparticuz/chromium/releases/download/v123.0.1/chromium-v123.0.1-pack.tar'
-    );
+    const executablePath = await chromium.executablePath();
+    console.log('Chromium path:', executablePath);
     
-    persistentBrowser = await puppeteerCore.launch({
-      args: [
-        ...chromium.args,
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--single-process',
-        '--hide-scrollbars',
-        '--disable-web-security',
-        '--disable-extensions',
-        '--disable-background-networking',
-        '--disable-sync',
-        '--disable-translate',
-        '--no-first-run'
-      ],
+    return await puppeteerCore.launch({
+      args: chromium.args,
       defaultViewport: chromium.defaultViewport,
-      executablePath,
+      executablePath: executablePath,
       headless: chromium.headless,
       ignoreHTTPSErrors: true,
     });
   }
+}
+
+async function getPersistentBrowser() {
+  if (isVercel) {
+    return await createBrowser();
+  }
+  
+  if (persistentBrowser && persistentBrowser.isConnected()) {
+    return persistentBrowser;
+  }
+  
+  persistentBrowser = await createBrowser();
   
   persistentBrowser.on('disconnected', () => {
     console.log('Navigateur déconnecté');
@@ -119,15 +113,19 @@ async function closeBrowserIfIdle() {
   }
 }
 
-setInterval(closeBrowserIfIdle, 60000);
+if (!isVercel) {
+  setInterval(closeBrowserIfIdle, 60000);
+}
 
 async function convertPageToPdf(pageUrl) {
   await waitForBrowserLock();
   
+  let browser = null;
   let page = null;
+  const shouldCloseBrowser = isVercel;
   
   try {
-    const browser = await getPersistentBrowser();
+    browser = await getPersistentBrowser();
     page = await browser.newPage();
     
     await page.setRequestInterception(true);
@@ -142,7 +140,7 @@ async function convertPageToPdf(pageUrl) {
     
     await page.goto(pageUrl, { 
       waitUntil: 'domcontentloaded',
-      timeout: 20000
+      timeout: 25000
     });
     
     await page.evaluate(() => {
@@ -169,6 +167,9 @@ async function convertPageToPdf(pageUrl) {
   } finally {
     if (page) {
       try { await page.close(); } catch (e) { }
+    }
+    if (shouldCloseBrowser && browser) {
+      try { await browser.close(); } catch (e) { }
     }
     releaseBrowserLock();
   }
@@ -642,11 +643,15 @@ app.get('/convertir', async (req, res) => {
 app.get('/warmup', async (req, res) => {
   try {
     console.log('Warmup: initialisation du navigateur...');
-    await getPersistentBrowser();
+    const browser = await getPersistentBrowser();
+    const ready = browser !== null && browser.isConnected();
+    if (isVercel) {
+      await browser.close();
+    }
     res.json({ 
       success: true, 
       message: 'Navigateur prêt',
-      browserReady: persistentBrowser !== null && persistentBrowser.isConnected()
+      browserReady: ready
     });
   } catch (error) {
     res.status(500).json({
@@ -659,6 +664,7 @@ app.get('/warmup', async (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     message: 'API Scraper PDF EDUCMAD',
+    environment: isReplit ? 'Replit' : (isVercel ? 'Vercel' : 'Other'),
     routes: {
       '/recherche': 'Rechercher les PDFs (sujets PC, corrections PC, mathématiques, corrections mathématiques)',
       '/convertir': 'Convertir une page HTML en PDF',
@@ -686,8 +692,7 @@ app.get('/', (req, res) => {
         'Toutes les corrections Math': '/recherche?pdf=cor Math A liste'
       },
       'Convertir page': '/convertir?url=http://mediatheque.accesmad.org/educmad/mod/page/view.php?id=26053'
-    },
-    conseil: 'Appelez /warmup une fois après le démarrage pour pré-charger le navigateur'
+    }
   });
 });
 
@@ -696,7 +701,8 @@ app.get('/health', (req, res) => {
     status: 'ok', 
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    browserReady: persistentBrowser !== null && persistentBrowser.isConnected(),
+    environment: isReplit ? 'Replit' : (isVercel ? 'Vercel' : 'Other'),
+    browserReady: !isVercel && persistentBrowser !== null && persistentBrowser.isConnected(),
     browserLocked: browserLock
   });
 });
@@ -726,10 +732,12 @@ function startKeepAlive() {
   }
 }
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Serveur démarré sur le port ${PORT}`);
-  startKeepAlive();
-});
+if (!isVercel) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Serveur démarré sur le port ${PORT}`);
+    startKeepAlive();
+  });
+}
 
 process.on('SIGTERM', async () => {
   console.log('Arrêt du serveur...');
