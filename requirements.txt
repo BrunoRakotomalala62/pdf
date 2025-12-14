@@ -8,3 +8,8 @@ flask
 gunicorn
 PyPDF2
 requests
+beautifulsoup4
+flask
+gunicorn
+PyPDF2
+requests
