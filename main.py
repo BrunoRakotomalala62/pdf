@@ -578,6 +578,41 @@ def capturer_page():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+import json
+
+CACHE_FILE = 'cache_url_json.json'
+DOWNLOAD_BASE_URL = "https://create-pdf-url.onrender.com/download"
+DEFAULT_EMAIL = "monsieurbruno0@gmail.com"
+
+def load_cache():
+    try:
+        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return {"pdfs": []}
+
+@app.route('/recherche')
+def recherche():
+    query = request.args.get('pdf', '').strip().lower()
+    if not query:
+        return jsonify({'error': 'Paramètre pdf requis. Exemple: /recherche?pdf=math 3'}), 400
+    
+    cache_data = load_cache()
+    pdfs = cache_data.get('pdfs', [])
+    
+    resultats = []
+    for pdf in pdfs:
+        nom = pdf.get('nom', '')
+        if query in nom.lower():
+            url_papermark = pdf.get('url_papermark', '')
+            url_telechargement = f"{DOWNLOAD_BASE_URL}?pdf={quote(url_papermark, safe='')}&email={quote(DEFAULT_EMAIL, safe='')}"
+            resultats.append({
+                'titre': nom,
+                'url_telechargement': url_telechargement
+            })
+    
+    return jsonify({'resultats': resultats})
+
 @app.route('/health')
 def health():
     return jsonify({
