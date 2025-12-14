@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: create-pdf-url
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /ms-playwright

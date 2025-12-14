@@ -19,33 +19,27 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
+.pythonlibs/
 
 # Virtual environments
 venv/
 ENV/
 env/
-.venv
+.venv/
 
-# Flask
-instance/
-.webassets-cache
-
-# PyCharm
+# IDE
 .idea/
-
-# VS Code
 .vscode/
+*.swp
+*.swo
 
 # Environment variables
 .env
 .env.local
 
-# Temporary files
-*.tmp
+# Logs
 *.log
-*.cache
 
-# OS files
+# OS
 .DS_Store
 Thumbs.db
