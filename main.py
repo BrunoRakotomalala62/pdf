@@ -369,8 +369,8 @@ def capture_page_as_pdf(url):
     if not WKHTMLTOPDF_AVAILABLE:
         return None, "wkhtmltopdf non disponible sur ce serveur"
     try:
-        # Configuration de pdfkit pour utiliser wkhtmltopdf
-        config = pdfkit.configuration(wkhtmltopdf='/usr/bin/wkhtmltopdf')
+        # Configuration de pdfkit pour utiliser wkhtmltopdf (path automatique)
+        config = pdfkit.configuration()
         
         # Options pour une capture propre
         options = {
@@ -398,7 +398,14 @@ def capture_page_as_pdf(url):
             
     except Exception as e:
         print(f"Erreur capture_page_as_pdf: {str(e)}")
-        return None, str(e)
+        # Tentative sans spécifier la configuration si ça échoue
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as output:
+                pdf_path = output.name
+            pdfkit.from_url(url, pdf_path, options=options)
+            return pdf_path, None
+        except Exception as e2:
+            return None, f"{str(e)} | {str(e2)}"
 
 
 @app.route('/')
