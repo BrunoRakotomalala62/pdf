@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, request, Response, redirect
+import pdfkit
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -366,64 +367,37 @@ def scrape_all_pdfs(subject_filter=None, serie_filter=None):
 
 def capture_page_as_pdf(url):
     if not WKHTMLTOPDF_AVAILABLE:
-        return None, "wkhtmltopdf non disponible"
+        return None, "wkhtmltopdf non disponible sur ce serveur"
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        response = requests.get(url, timeout=30, headers=headers)
-        response.encoding = 'utf-8'
-        soup = BeautifulSoup(response.text, 'html.parser')
-        elements_to_remove = ['footer', 'nav', 'header', '.navbar', '#page-footer', '.footer', '.logininfo', 
-                              '.modifiedinfo', '#page-header', '.drawer', '.usermenu', '.accesshide', 
-                              '.skip-block', '.nav-item', '.breadcrumb', '#nav-drawer', '.secondary-navigation',
-                              '.primary-navigation', '.page-context-header', '[data-region="drawer"]']
-        for selector in elements_to_remove:
-            for element in soup.select(selector):
-                element.decompose()
-        for text in soup.find_all(string=re.compile(r'Modifié le:|Fourni par Moodle|Copyright.*Educmad', re.I)):
-            parent = text.find_parent()
-            if parent:
-                parent.decompose()
-        content_div = None
-        for selector in ['div.box.generalbox', 'div#region-main', 'section#region-main', '.course-content']:
-            content_div = soup.select_one(selector)
-            if content_div:
-                break
-        if content_div:
-            html_content = str(content_div)
-        else:
-            body = soup.find('body')
-            html_content = str(body) if body else str(soup)
-        clean_html = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <style>
-        body {{ font-family: 'Times New Roman', Times, serif; font-size: 12pt; line-height: 1.5; padding: 20px; }}
-        img {{ max-width: 100%; height: auto; }}
-        table {{ border-collapse: collapse; width: 100%; }}
-        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-    </style>
-</head>
-<body>{html_content}</body>
-</html>"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as html_file:
-            html_file.write(clean_html)
-            html_path = html_file.name
-        pdf_path = html_path.replace('.html', '.pdf')
-        result = subprocess.run([
-            'wkhtmltopdf', '--quiet', '--encoding', 'utf-8', '--page-size', 'A4',
-            '--margin-top', '10mm', '--margin-bottom', '10mm',
-            '--margin-left', '10mm', '--margin-right', '10mm',
-            html_path, pdf_path
-        ], capture_output=True, timeout=60)
-        os.unlink(html_path)
-        if result.returncode == 0 and os.path.exists(pdf_path):
+        # Configuration de pdfkit pour utiliser wkhtmltopdf
+        config = pdfkit.configuration(wkhtmltopdf='/usr/bin/wkhtmltopdf')
+        
+        # Options pour une capture propre
+        options = {
+            'page-size': 'A4',
+            'margin-top': '10mm',
+            'margin-right': '10mm',
+            'margin-bottom': '10mm',
+            'margin-left': '10mm',
+            'encoding': "UTF-8",
+            'no-outline': None,
+            'quiet': ''
+        }
+        
+        # Création d'un fichier temporaire pour le PDF
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as output:
+            pdf_path = output.name
+            
+        # Conversion directe de l'URL en PDF via pdfkit
+        pdfkit.from_url(url, pdf_path, configuration=config, options=options)
+        
+        if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
             return pdf_path, None
         else:
-            return None, "Erreur lors de la génération du PDF"
-    except subprocess.TimeoutExpired:
-        return None, "Timeout lors de la génération du PDF"
+            return None, "Le PDF généré est vide ou inexistant"
+            
     except Exception as e:
+        print(f"Erreur capture_page_as_pdf: {str(e)}")
         return None, str(e)
 
 

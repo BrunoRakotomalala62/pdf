@@ -4,7 +4,7 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
-packages = ["alsa-lib", "at-spi2-atk", "cairo", "chromium", "cups", "dbus", "exiftool", "expat", "freetype", "ghostscript", "gitFull", "glib", "gtk3", "imagemagickBig", "lcms2", "libdrm", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "libxkbcommon", "mesa", "mupdf", "netpbm", "nspr", "nss", "openjpeg", "pango", "playwright-driver", "poppler_utils", "tcl", "tk", "xorg.libX11", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "xorg.libxcb", "zlib"]
+packages = ["alsa-lib", "at-spi2-atk", "cairo", "chromium", "cups", "dbus", "exiftool", "expat", "freetype", "ghostscript", "gitFull", "glib", "gtk3", "imagemagickBig", "lcms2", "libdrm", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "libxkbcommon", "mesa", "mupdf", "netpbm", "nspr", "nss", "openjpeg", "pango", "playwright-driver", "poppler_utils", "tcl", "tk", "xorg.libX11", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "xorg.libxcb", "zlib", "wkhtmltopdf"]
 
 [workflows]
 runButton = "Project"
