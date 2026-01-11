@@ -369,43 +369,77 @@ def capture_page_as_pdf(url):
     if not WKHTMLTOPDF_AVAILABLE:
         return None, "wkhtmltopdf non disponible sur ce serveur"
     try:
-        # Configuration de pdfkit pour utiliser wkhtmltopdf (path automatique)
-        config = pdfkit.configuration()
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, timeout=30, headers=headers)
+        response.encoding = 'utf-8'
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Extraction du contenu principal (Sujet Bacc)
+        # On cible les conteneurs de contenu typiques de Moodle/Educmad
+        content_div = soup.select_one('div.box.generalbox') or \
+                      soup.select_one('div#region-main') or \
+                      soup.select_one('section#region-main') or \
+                      soup.select_one('.course-content')
+
+        if not content_div:
+            content_div = soup.find('body')
+
+        # Nettoyage supplémentaire dans le contenu extrait
+        # Supprimer les infos de modification, copyright, etc. qui sont dans le flux de texte
+        for element in content_div.select('.modifiedinfo, .logininfo, .footer, .navbar, .breadcrumb'):
+            element.decompose()
+            
+        # On cherche à s'arrêter juste avant "Modifié le :" ou les infos de copyright
+        # BeautifulSoup decompose() est radical, on va plutôt reconstruire un HTML propre
         
-        # Options pour une capture propre
+        html_content = str(content_div)
+        
+        # Style pour le PDF
+        clean_html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {{ font-family: 'Times New Roman', Times, serif; font-size: 12pt; line-height: 1.5; padding: 20px; color: #333; }}
+        img {{ max-width: 100%; height: auto; display: block; margin: 10px 0; }}
+        table {{ border-collapse: collapse; width: 100%; margin: 15px 0; }}
+        th, td {{ border: 1px solid #999; padding: 8px; text-align: left; }}
+        .no-print {{ display: none; }}
+    </style>
+</head>
+<body>{html_content}</body>
+</html>"""
+
+        # Configuration de pdfkit
+        config = pdfkit.configuration()
         options = {
             'page-size': 'A4',
-            'margin-top': '10mm',
-            'margin-right': '10mm',
-            'margin-bottom': '10mm',
-            'margin-left': '10mm',
+            'margin-top': '15mm',
+            'margin-right': '15mm',
+            'margin-bottom': '15mm',
+            'margin-left': '15mm',
             'encoding': "UTF-8",
             'no-outline': None,
             'quiet': ''
         }
         
-        # Création d'un fichier temporaire pour le PDF
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as output:
-            pdf_path = output.name
+        with tempfile.NamedTemporaryFile(suffix='.html', mode='w', encoding='utf-8', delete=False) as f:
+            f.write(clean_html)
+            html_path = f.name
             
-        # Conversion directe de l'URL en PDF via pdfkit
-        pdfkit.from_url(url, pdf_path, configuration=config, options=options)
+        pdf_path = html_path.replace('.html', '.pdf')
+        pdfkit.from_file(html_path, pdf_path, configuration=config, options=options)
+        
+        os.unlink(html_path)
         
         if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
             return pdf_path, None
         else:
-            return None, "Le PDF généré est vide ou inexistant"
+            return None, "Le PDF généré est vide"
             
     except Exception as e:
         print(f"Erreur capture_page_as_pdf: {str(e)}")
-        # Tentative sans spécifier la configuration si ça échoue
-        try:
-            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as output:
-                pdf_path = output.name
-            pdfkit.from_url(url, pdf_path, options=options)
-            return pdf_path, None
-        except Exception as e2:
-            return None, f"{str(e)} | {str(e2)}"
+        return None, str(e)
 
 
 @app.route('/')
