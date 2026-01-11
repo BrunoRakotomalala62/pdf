@@ -491,6 +491,25 @@ def telecharger_pdf():
         return jsonify({'error': 'URL non autorisée. Seuls les domaines accesmad.org sont acceptés.'}), 403
     try:
         pdf_url, error = resolve_pdf_url(url)
+        
+        # Si aucun PDF n'est trouvé, on tente une capture directe s'il s'agit d'une page
+        if (error or not pdf_url) and ('mod/page' in url or 'page/view' in url):
+            print(f"Tentative de capture directe pour: {url}")
+            pdf_path, capture_error = capture_page_as_pdf(url)
+            if not capture_error and pdf_path:
+                with open(pdf_path, 'rb') as f:
+                    pdf_content = f.read()
+                os.unlink(pdf_path)
+                
+                filename = f"{clean_filename(titre)}.pdf" if titre else "capture.pdf"
+                return Response(
+                    pdf_content,
+                    mimetype='application/pdf',
+                    headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+                )
+            else:
+                return jsonify({'error': capture_error or 'Échec de la capture', 'url_originale': url}), 404
+
         if error or not pdf_url:
             return jsonify({'error': error or 'PDF non trouvé', 'url_originale': url}), 404
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
