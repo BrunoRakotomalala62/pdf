@@ -454,6 +454,7 @@ def index():
             "/matieres": "Liste des matières disponibles",
             "/pdfs": "Récupérer tous les PDFs (paramètres: matiere, serie, type, annee)",
             "/pdf/<matiere>": "Récupérer les PDFs d'une matière spécifique",
+            "/recherche_cache": "Rechercher dans le cache (paramètre: q)",
             "/telecharger": "Télécharger un PDF (paramètre: url, titre)",
             "/capturer": "Capturer une page en PDF (paramètre: url, titre)"
         },
@@ -461,6 +462,7 @@ def index():
             "Tous les PDFs de Mathématiques": f"{base_url}/pdf/mathematiques",
             "PDFs de Physique série A": f"{base_url}/pdfs?matiere=physique&serie=A",
             "Sujets de Français 2020": f"{base_url}/pdfs?matiere=francais&type=sujet&annee=2020",
+            "Recherche dans le cache": f"{base_url}/recherche_cache?q=physique",
             "Liste des matières": f"{base_url}/matieres",
             "Télécharger un PDF": f"{base_url}/telecharger?url=http://mediatheque.accesmad.org/...",
             "État du serveur": f"{base_url}/health"
