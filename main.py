@@ -522,6 +522,64 @@ def get_pdfs_by_matiere(matiere):
         'filtres': {'serie': serie, 'type': type_doc, 'annee': annee}
     })
 
+@app.route('/download')
+def download_google_drive_pdf():
+    file_id = request.args.get('id', '')
+    if not file_id:
+        return jsonify({'error': 'Paramètre id requis'}), 400
+    
+    # URL de téléchargement direct pour Google Drive
+    download_url = f"https://docs.google.com/uc?export=download&id={file_id}"
+    
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(download_url, stream=True, headers=headers, allow_redirects=True)
+        
+        if response.status_code == 200:
+            filename = "document.pdf"
+            # On cherche le nom dans le cache si possible
+            try:
+                import json
+                with open('cache_url_json.json', 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                    for pdf in cache_data.get('pdfs', []):
+                        if pdf.get('google_drive_id') == file_id:
+                            filename = f"{clean_filename(pdf.get('nom'))}.pdf"
+                            break
+            except:
+                pass
+
+            return Response(
+                response.content,
+                mimetype='application/pdf',
+                headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+            )
+        else:
+            return jsonify({'error': 'Impossible de télécharger le fichier depuis Google Drive'}), response.status_code
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/recherche_cache')
+def recherche_cache():
+    query = request.args.get('q', '').lower()
+    try:
+        import json
+        with open('cache_url_json.json', 'r', encoding='utf-8') as f:
+            cache_data = json.load(f)
+        
+        resultats = []
+        for pdf in cache_data.get('pdfs', []):
+            if not query or query in pdf.get('nom', '').lower():
+                item = pdf.copy()
+                if 'google_drive_id' in pdf:
+                    base_url = get_api_base_url()
+                    item['url_telechargement'] = f"{base_url}/download?id={pdf['google_drive_id']}"
+                resultats.append(item)
+        
+        return jsonify({'resultats': resultats, 'total': len(resultats)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/telecharger')
 def telecharger_pdf():
     url = request.args.get('url', '')
