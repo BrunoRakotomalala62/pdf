@@ -106,11 +106,25 @@ def resolve_pdf_url(resource_url):
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         response = requests.get(resource_url, timeout=30, allow_redirects=True, headers=headers)
         response.encoding = 'utf-8'
+        
+        # 1. Vérification si c'est déjà un PDF
         if 'application/pdf' in response.headers.get('Content-Type', ''):
             if not is_allowed_url(response.url):
                 return None, "Redirection vers un domaine non autorisé"
             return response.url, None
+
         soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 2. Recherche spécifique pour Moodle (Educmad) - Bouton de téléchargement
+        # Souvent dans div.resourceworkaround ou un lien direct vers pluginfile.php?forcedownload=1
+        moodle_download = soup.select_one('div.resourceworkaround a[href*="forcedownload=1"]')
+        if moodle_download:
+            url = moodle_download.get('href')
+            if url.startswith('/'):
+                url = f"http://mediatheque.accesmad.org{url}"
+            return url, None
+
+        # 3. Recherche de liens pluginfile.php (PDF)
         pluginfile_patterns = [
             r'(https?://mediatheque\.accesmad\.org[^"\']+pluginfile\.php[^"\']+\.pdf[^"\']*)',
             r'(https?://mediatheque\.accesmad\.org[^"\']+\.pdf[^"\']*)',
@@ -124,30 +138,23 @@ def resolve_pdf_url(resource_url):
                     url = f"http://mediatheque.accesmad.org{url}"
                 if is_allowed_url(url):
                     return url, None
-        object_tag = soup.find('object', {'data': re.compile(r'\.pdf', re.I)})
-        if object_tag and hasattr(object_tag, 'get'):
-            data_url = object_tag.get('data')
-            if data_url and isinstance(data_url, str):
-                if not data_url.startswith('http'):
-                    data_url = f"http://mediatheque.accesmad.org{data_url}"
-                if is_allowed_url(data_url):
-                    return data_url, None
-        embed_tag = soup.find('embed', {'src': re.compile(r'\.pdf', re.I)})
-        if embed_tag and hasattr(embed_tag, 'get'):
-            src_url = embed_tag.get('src')
-            if src_url and isinstance(src_url, str):
-                if not src_url.startswith('http'):
-                    src_url = f"http://mediatheque.accesmad.org{src_url}"
-                if is_allowed_url(src_url):
-                    return src_url, None
-        iframe_tag = soup.find('iframe', {'src': re.compile(r'pluginfile\.php', re.I)})
-        if iframe_tag and hasattr(iframe_tag, 'get'):
-            iframe_url = iframe_tag.get('src')
-            if iframe_url and isinstance(iframe_url, str):
-                if not iframe_url.startswith('http'):
-                    iframe_url = f"http://mediatheque.accesmad.org{iframe_url}"
-                if is_allowed_url(iframe_url):
-                    return iframe_url, None
+
+        # 4. Objets, embeds et iframes
+        tags_to_check = [
+            ('object', 'data'),
+            ('embed', 'src'),
+            ('iframe', 'src')
+        ]
+        for tag, attr in tags_to_check:
+            for element in soup.find_all(tag, **{attr: re.compile(r'\.pdf|pluginfile\.php', re.I)}):
+                val = element.get(attr)
+                if val:
+                    if not val.startswith('http'):
+                        val = f"http://mediatheque.accesmad.org{val}"
+                    if is_allowed_url(val):
+                        return val, None
+
+        # 5. Dernier recours : n'importe quel lien PDF
         pdf_links = soup.find_all('a', href=re.compile(r'\.pdf', re.I))
         for link in pdf_links:
             href = link.get('href', '')
@@ -156,6 +163,7 @@ def resolve_pdf_url(resource_url):
                     href = f"http://mediatheque.accesmad.org{href}"
                 if is_allowed_url(href):
                     return href, None
+        
         return None, "Aucun PDF trouvé dans cette page"
     except requests.exceptions.Timeout:
         return None, "Timeout lors de la connexion"
