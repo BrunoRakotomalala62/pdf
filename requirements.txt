@@ -10,3 +10,9 @@ PyPDF2==3.0.1
 requests==2.31.0
 img2pdf
 pdfkit
+beautifulsoup4
+flask
+gunicorn
+img2pdf
+PyPDF2
+requests
