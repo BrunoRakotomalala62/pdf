@@ -259,21 +259,53 @@ def scrape_section(url, default_type, default_subject=None, default_serie=None):
     except Exception as e:
         return {'error': str(e)}
 
+def scrape_course_sections(course_id):
+    """Découvre dynamiquement les sections d'un cours Moodle."""
+    try:
+        url = f"{BASE_COURSE_URL}{course_id}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, timeout=30, headers=headers)
+        response.encoding = 'utf-8'
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        sections = []
+        # Chercher les titres de section pour identifier Sujets et Corrections
+        section_elements = soup.select('li.section.main')
+        for i, section in enumerate(section_elements):
+            title_tag = section.select_one('.sectionname')
+            title = title_tag.get_text(strip=True).lower() if title_tag else ""
+            
+            # Plus flexible : on cherche des mots clés pour identifier le contenu
+            if any(k in title for k in ['sujet', 'énoncé', 'enonce', 'épreuve']):
+                sections.append({'type': 'sujet', 'id': i})
+            elif any(k in title for k in ['corrig', 'correction', 'réponse', 'reponse']):
+                sections.append({'type': 'correction', 'id': i})
+        
+        # Si rien n'est trouvé, on tente de scraper toutes les sections visibles
+        if not sections:
+            for i in range(len(section_elements)):
+                sections.append({'type': 'contenu', 'id': i})
+                
+        return sections if sections else [{'type': 'sujet', 'id': 1}, {'type': 'correction', 'id': 2}]
+    except:
+        return [{'type': 'sujet', 'id': 1}, {'type': 'correction', 'id': 2}]
+
 def scrape_course(course_id, default_subject=None, sections=None, default_serie=None):
     all_pdfs = []
-    if sections is None:
-        sections = {'sujet': 1, 'correction': 2}
-    sujet_section = sections.get('sujet', 1)
-    correction_section = sections.get('correction', 2)
-    sujets_url = f"{BASE_COURSE_URL}{course_id}&section={sujet_section}"
-    sujets = scrape_section(sujets_url, 'sujet', default_subject, default_serie)
-    if isinstance(sujets, list):
-        all_pdfs.extend(sujets)
-    if correction_section != sujet_section:
-        corrections_url = f"{BASE_COURSE_URL}{course_id}&section={correction_section}"
-        corrections = scrape_section(corrections_url, 'correction', default_subject, default_serie)
-        if isinstance(corrections, list):
-            all_pdfs.extend(corrections)
+    
+    # Découverte dynamique si sections n'est pas fourni ou incomplet
+    if not sections:
+        dynamic_sections = scrape_course_sections(course_id)
+    else:
+        # Convertir le format statique {type: id} en liste [{type, id}]
+        dynamic_sections = [{'type': t, 'id': i} for t, i in sections.items()]
+
+    for section_info in dynamic_sections:
+        section_url = f"{BASE_COURSE_URL}{course_id}&section={section_info['id']}"
+        pdfs = scrape_section(section_url, section_info['type'], default_subject, default_serie)
+        if isinstance(pdfs, list):
+            all_pdfs.extend(pdfs)
+            
     return all_pdfs
 
 def scrape_all_pdfs(subject_filter=None, serie_filter=None):
